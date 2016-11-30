@@ -771,7 +771,7 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 	rgb defaultMask = { 0, 0, 0 };
 	Gamma defaultGamma = { 0.0, 0.0, 0.0 };
 	int driNumBufs;
-	int flags24;
+//	int flags24;
 
 	TRACE_ENTER();
 
@@ -799,14 +799,14 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 	default_depth = 24;  /* TODO: MIDEGL-1445: get from kernel */
 	fbbpp = 32;          /* TODO: MIDEGL-1445: get from kernel */
 
-	flags24 = Support24bppFb | Support32bppFb | SupportConvert24to32;
-	if (!xf86SetDepthBpp(pScrn, 0, 0, 0, flags24))
-		goto fail;
-
-//	if (!xf86SetDepthBpp(pScrn, default_depth, 0, fbbpp, Support32bppFb)) {
-//		/* The above function prints an error message. */
+//	flags24 = Support24bppFb | Support32bppFb | SupportConvert24to32;
+//	if (!xf86SetDepthBpp(pScrn, 0, 0, 0, flags24))
 //		goto fail;
-//	}
+
+	if (!xf86SetDepthBpp(pScrn, default_depth, 0, fbbpp, Support32bppFb)) {
+		/* The above function prints an error message. */
+		goto fail;
+	}
 	xf86PrintDepthBpp(pScrn);
 
 	/* Set the color weight: */

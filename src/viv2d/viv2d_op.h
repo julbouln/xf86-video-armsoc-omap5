@@ -64,19 +64,22 @@ static inline void _Viv2DOpDestroy(Viv2DOp *op) {
 	free(op);
 }
 
-static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height, Bool relative) {
-	uint32_t src_cfg = VIVS_DE_SRC_CONFIG_SOURCE_FORMAT(src->format.fmt) |
-	                   VIVS_DE_SRC_CONFIG_SWIZZLE(src->format.swizzle) |
+static inline uint32_t Viv2DSrcConfig(Viv2DFormat *format, Bool relative) {
+	uint32_t src_cfg = VIVS_DE_SRC_CONFIG_SOURCE_FORMAT(format->fmt) |
+	                   VIVS_DE_SRC_CONFIG_SWIZZLE(format->swizzle) |
 	                   VIVS_DE_SRC_CONFIG_LOCATION_MEMORY |
-	                   VIVS_DE_SRC_CONFIG_PE10_SOURCE_FORMAT(src->format.fmt);
+	                   VIVS_DE_SRC_CONFIG_PE10_SOURCE_FORMAT(format->fmt);
 
 	if (relative)
 		src_cfg |= VIVS_DE_SRC_CONFIG_SRC_RELATIVE_RELATIVE;
 
+	return src_cfg;
+}
+static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height, Viv2DFormat *format, Bool relative) {
 	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, src->pitch);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
-	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, src_cfg);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(format, relative));
 	etna_set_state(v2d->stream, VIVS_DE_SRC_ORIGIN,
 	               VIVS_DE_SRC_ORIGIN_X(srcX) |
 	               VIVS_DE_SRC_ORIGIN_Y(srcY));
@@ -84,6 +87,10 @@ static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int src
 	               VIVS_DE_SRC_SIZE_X(width) |
 	               VIVS_DE_SRC_SIZE_Y(height)
 	              ); // source size is ignored
+
+}
+static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height, Bool relative) {
+	_Viv2DStreamSrcWithFormat( v2d,  src,  srcX,  srcY,  width,  height, &src->format, relative);
 }
 
 static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd, Viv2DRect *clip) {

@@ -97,7 +97,9 @@ enum viv2d_src_type {
 
 typedef struct _Viv2DOp {
 	Viv2DBlendOp *blend_op;
+	Bool has_mask;
 	int src_type;
+	int msk_type;
 
 	uint32_t fg;
 	uint32_t mask;
@@ -110,6 +112,8 @@ typedef struct _Viv2DOp {
 	Viv2DPixmapPrivPtr src;
 	Viv2DPixmapPrivPtr msk;
 	Viv2DPixmapPrivPtr dst;
+
+	Viv2DFormat msk_fmt;
 
 	int prev_src_x;
 	int prev_src_y;
@@ -188,6 +192,59 @@ static inline Bool Viv2DFixNonAlpha(Viv2DFormat *fmt)
 		return TRUE;
 	}
 	return FALSE;
+}
+
+static inline const char *Viv2DFormatColorStr(Viv2DFormat *fmt)
+{
+	switch (fmt->fmt) {
+	case DE_FORMAT_A4R4G4B4:
+		return "A4R4G4B4";
+	case DE_FORMAT_X1R5G5B5:
+		return "X1R5G5B5";
+	case DE_FORMAT_A1R5G5B5:
+		return "A1R5G5B5";
+	case DE_FORMAT_R5G6B5:
+		return "R5G6B5";
+	case DE_FORMAT_X8R8G8B8:
+		return "X8R8G8B8";
+	case DE_FORMAT_A8R8G8B8:
+		return "A8R8G8B8";
+	case DE_FORMAT_X4R4G4B4:
+		return "X4R4G4B4";
+	case DE_FORMAT_A8:
+		return "A8";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+
+static inline const char *Viv2DFormatSwizzleStr(Viv2DFormat *fmt)
+{
+	switch (fmt->swizzle) {
+	case DE_SWIZZLE_ARGB:
+		return "ARGB";
+	case DE_SWIZZLE_RGBA:
+		return "RGBA";
+	case DE_SWIZZLE_ABGR:
+		return "ABGR";
+	case DE_SWIZZLE_BGRA:
+		return "BGRA";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+static inline Viv2DPixmapPrivPtr Viv2DAllocPix(Viv2DRec *v2d,int width, int height, int pitch) {
+
+	Viv2DPixmapPrivPtr vpix = calloc(1, sizeof *vpix);
+	if (vpix) {
+		vpix->width = width;
+		vpix->height = height;
+		vpix->pitch = pitch;
+//		vpix->bo = etna_bo_new(v2d->dev, pitch*height,ETNA_BO_UNCACHED);
+	}
+	return vpix;
 }
 
 #ifdef ETNA_BO_FROM_HANDLE_MISSING
