@@ -1,0 +1,160 @@
+.\" shorthand for double quote that works everywhere.
+.ds q \N'34'
+.TH armsoc  __drivermansuffix__ __vendorversion__
+.SH NAME
+armsoc \- Arm SoC graphics
+.SH SYNOPSIS
+.nf
+.B "Section \*qDevice\*q"
+.BI "  Identifier \*q"  devname \*q
+.B  "  Driver \*qarmsoc\*q"
+\ \ ...
+.B EndSection
+.fi
+.SH DESCRIPTION
+.B armsoc
+is an __xservername__ driver for Arm Mali SoCs.
+.SH SUPPORTED HARDWARE
+.B armsoc
+supports the Mali-T400 & Mali-T60x
+
+.SH CONFIGURATION DETAILS
+Please refer to __xconfigfile__(__filemansuffix__) for general configuration
+details.  This section only covers configuration details specific to this
+driver.
+.PP
+The following driver
+.B Options
+are supported
+.TP
+.BI "Option \*qDebug\*q \*q" boolean \*q
+Enable debug logging.
+.IP
+Default: Debug logging is Disabled
+.TP
+.BI "Option \*qNoFlip\*q \*q" boolean \*q
+Disable buffer flipping.
+.IP
+Default: Flipping is Enabled
+.TP
+.BI "Option \*qDriverName\*q \*q" string \*q
+The name of the drm driver to use.
+.IP
+Default: NULL
+.TP
+.BI "Option \*qBusID\*q \*q" string \*q
+The Bus ID of the drm device to use.
+.IP
+Default: NULL
+.TP
+.BI "Option \*qDRICard\*q \*q" integer \*q
+Select which dri card to use.
+.IP
+Default: 0
+.TP
+.BI "Option \*qInitFromFBDev\*q \*q" string \*q
+Specifies an fbdev device node (such as "/dev/fb0") to use to initialize the
+DRM scanout buffer. Specifying this option only makes sense (and is required)
+when X is started with the parameter "-background none".
+
+The InitFromFBDev functionality is limited to when the fbdev device pixel
+format matches the format of the X screen. This includes bits-per-pixel and RGB
+ordering and size. If the driver is unable to copy from the fbdev device then
+an error will be logged, and the -background none functionality will be
+disabled.
+.IP
+Default: NULL
+.TP
+.BI "Option \*qUMP_LOCK\*q \*q" boolean \*q
+Use the umplock module for cross-process access synchronization. It should be only enabled for Mali400
+.IP
+Default: Umplock is Disabled
+
+.SH DRM DEVICE SELECTION
+
+Either the DRM driver name or bus ID can be specified using e.g.
+
+.nf
+.B "Section \*qDevice\*q"
+.BI "  Driver \*qarmsoc\*q"
+.BI "  Option \*qDriverName\*q \*qpl111_drm\*q"
+.B "EndSection"
+
+or
+
+.B "Section \*qDevice\*q"
+.BI "  Driver \*qarmsoc\*q"
+.BI "  Option \*qBusID\*q      \*qplatform:pl111_drm:00\*q"
+.B "EndSection"
+
+If neither of these are set then /dev/dri/card0 is used. In this case
+the card number can be set using the \*qDRICard\*q option.
+
+.B "Section \*qDevice\*q"
+.BI "  Driver \*qarmsoc\*q"
+.BI "  Option \*qDRICard\*q      \*q1\*q"
+.B "EndSection"
+
+.SH OUTPUT CONFIGURATION
+
+The driver supports runtime configuration of detected outputs.  You can use the
+.B xrandr
+tool to control outputs on the command line as follows:
+
+.RS
+.B xrandr \-\-output
+.I output
+.B \-\-set
+.I property value
+.RE
+
+Note that you may need to quote property and value arguments that contain spaces.
+Each output listed below may have one or more properties associated
+with it (like a binary EDID block if one is found).  Some outputs have
+unique properties which are described below.  See the "MULTIHEAD
+CONFIGURATIONS" section below for additional information.
+
+TODO
+
+.PP
+See __xconfigfile__(__filemansuffix__) for information on associating Monitor
+sections with these outputs for configuration.  Associating Monitor sections
+with each output can be helpful if you need to ignore a specific output, for
+example, or statically configure an extended desktop monitor layout.
+
+.SH MULTIHEAD CONFIGURATIONS
+
+The number of independent outputs is dictated by the number of CRTCs
+(in X parlance) a given chip supports. The actual number of displays
+supported will depend on the board.  But a built-in LCD and
+external HDMI are a common configuration. 
+
+You can use the "xrandr" tool, or various desktop utilities, to change
+your output configuration at runtime.  To statically configure your
+outputs, you can use the "Monitor-<type>" options along with
+additional monitor sections in your xorg.conf to create your screen
+topology.  The example below puts the VGA output to the right of the
+builtin laptop screen, both running at 1024x768.
+
+.nf
+.B "Section \*qMonitor\*q"
+.BI "  Identifier \*qLaptop FooBar Internal Display\*q"
+.BI "  Option \*qPosition\*q \*q0 0\*q"
+.B "EndSection"
+
+.B "Section \*qMonitor\*q"
+.BI "  Identifier \*qSome Random CRT\*q"
+.BI "  Option \*qPosition\*q \*q1024 0\*q"
+.BI "  Option \*qRightOf\*q \*qLaptop FoodBar Internal Display\*q"
+.B "EndSection"
+
+.B "Section \*qDevice\*q"
+.BI "  Driver \*qarmsoc\*q"
+.BI "  Option \*qmonitor-LVDS\*q \*qLaptop FooBar Internal Display\*q"
+.BI "  Option \*qmonitor-VGA\*q \*qSome Random CRT\*q"
+.B "EndSection"
+        
+.SH "SEE ALSO"
+__xservername__(__appmansuffix__), __xconfigfile__(__filemansuffix__), Xserver(__appmansuffix__), X(__miscmansuffix__)
+.SH AUTHORS
+Authors include: Ian Elliott, Rob Clark.
