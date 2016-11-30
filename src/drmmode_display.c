@@ -1487,7 +1487,7 @@ static Bool resize_scanout_bo(ScrnInfoPtr pScrn, int width, int height)
 
 	/* We don't expect the depth and bpp to change for the screen
 	 * assert this here as a check */
-	assert(depth == pScrn->bitsPerPixel);
+	assert(depth == pScrn->depth);
 	assert(bpp == pScrn->bitsPerPixel);
 
 	pScrn->virtualX = width;
