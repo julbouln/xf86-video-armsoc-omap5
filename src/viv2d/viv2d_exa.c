@@ -60,7 +60,7 @@
 #define VIV2D_REPEAT_WITH_MASK 1
 
 #define VIV2D_MIN_HW_HEIGHT 64
-#define VIV2D_MIN_HW_SIZE_24BIT (128 * 128)
+#define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
 
 static Viv2DBlendOp viv2d_blend_op[] = {
 	{PictOpClear,			DE_BLENDMODE_ZERO, 				DE_BLENDMODE_ZERO},
@@ -267,13 +267,24 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 		Viv2DPixmapPrivPtr pix = privPix->priv;
 
-		if (pix->bo && pix->bo != v2d->bo) {
-			etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
-			etna_bo_del(pix->bo);
-			pix->bo = NULL;
-			if (pix->dmaFD) {
-				close(pix->dmaFD);
-				pix->dmaFD = 0;
+//		if (pix->bo && pix->bo != v2d->bo) {
+		if (privPix->bo == pARMSOC->scanout) {
+		} else {
+			if (pix->bo) {
+				etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+				VIV2D_DBG_MSG("Viv2DDetachBo del bo %p", pix->bo);
+#ifdef RAW_ETNA_BO
+				raw_etna_bo_del(pix->bo);
+#else
+				etna_bo_del(pix->bo);
+#endif
+				pix->bo = NULL;
+				/*
+				if (pix->dmaFD) {
+					close(pix->dmaFD);
+					pix->dmaFD = 0;
+				}
+				*/
 			}
 		}
 	}
@@ -288,14 +299,19 @@ static inline void Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		if (privPix->bo == pARMSOC->scanout) {
 			pix->bo = v2d->bo;
 		} else {
-//		if (!pix->bo) {
 			pix->dmaFD = armsoc_bo_get_dmabuf(privPix->bo);
 			if (pix->dmaFD) {
+#ifdef RAW_ETNA_BO
+				pix->bo = raw_etna_bo_from_dmabuf(v2d->dev, pix->dmaFD);
+#else
 				pix->bo = etna_bo_from_dmabuf(v2d->dev, pix->dmaFD);
+#endif
+				close(pix->dmaFD);
+				VIV2D_DBG_MSG("Viv2DAttachBo new bo %p", pix->bo);
+
 			} else {
 				VIV2D_ERR_MSG("cannot attach bo : %d", pix->dmaFD);
 			}
-//		}
 		}
 	}
 }
@@ -424,11 +440,11 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	}
 
 	Viv2DAttachBo(pARMSOC, armsocPix);
-
-	VIV2D_DBG_MSG("Viv2DUploadToScreen check %p(%d) %dx%d(%dx%d) %dx%d %d/%d", src, src_pitch, x, y, w, h,
-	              pDst->drawable.width, pDst->drawable.height,
-	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
-
+	/*
+		VIV2D_DBG_MSG("Viv2DUploadToScreen check %p(%d) %dx%d(%dx%d) %dx%d %d/%d", src, src_pitch, x, y, w, h,
+		              pDst->drawable.width, pDst->drawable.height,
+		              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+	*/
 	Viv2DPixmapPrivRec pix;
 	pix.width = w;
 	pix.height = h;
@@ -459,68 +475,6 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 	int pitch = srcp->pitch;
 
-#ifdef VIV2D_UPLOAD_USERPTR
-	int size = ALIGN(pitch * h, 4096);
-	void *mem = NULL;
-	Bool aligned = FALSE;
-
-//	if (ALIGN((uintptr_t)src, 4096) == (uintptr_t)src)
-//		aligned = TRUE;
-
-	VIV2D_DBG_MSG("Viv2DUploadToScreen %p %dx%d(%dx%d) %d/%d/%d %d %d", src, x, y, w, h,
-	              src_pitch, srcp->pitch, pitch, dst->pitch, w * bytesPerPixel);
-
-	char *src_buf = src;
-	char *buf;
-
-	if (!aligned) {
-		posix_memalign(&mem, 4096, size); // aligned buf with aligned size
-
-		buf = mem;
-//	char *buf = (char *) etna_bo_map(srcp->bo);
-
-		// just copy the needed rect (w x h)
-		while (height--) {
-			memcpy(buf, src_buf, w * bytesPerPixel);
-//		memcpy(buf, src_buf, pitch);
-			src_buf += src_pitch;
-			buf += pitch;
-		}
-	} else {
-		mem = src;
-	}
-
-	/*	int i;
-			for (i = 0, buf = mem; i < height; i++, buf += pitch)
-				memcpy(buf, src + src_pitch * i, pitch);
-	*/
-	struct drm_etnaviv_gem_userptr ureq = {
-		.user_ptr = (uintptr_t)mem,
-		.user_size = size,
-		.flags = ETNA_USERPTR_READ,
-	};
-
-	int err = drmCommandWriteRead(v2d->fd, DRM_ETNAVIV_GEM_USERPTR, &ureq, sizeof(ureq));
-	if (err) {
-		VIV2D_ERR_MSG("Viv2DUploadToScreen userptr fail %d", err);
-		return FALSE;
-	}
-	VIV2D_DBG_MSG("Viv2DUploadToScreen userptr opened %d", ureq.handle);
-
-#ifdef ETNA_BO_FROM_HANDLE_MISSING
-	/* !!! we need access to private struct etna_bo since etna_bo_from_handle is missing !!! */
-//	srcp->bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
-
-	srcp->bo = etna_bo_alloc(v2d->dev);
-	srcp->bo->size = size;
-	srcp->bo->handle = ureq.handle;
-#else
-//	srcp->bo = etna_bo_from_handle(v2d->dev, req.handle, size);
-#endif
-	VIV2D_DBG_MSG("Viv2DUploadToScreen bo attached %d", ureq.handle);
-
-#else
-
 	int size = pitch * srcp->height;
 	srcp->bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
 
@@ -533,8 +487,6 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 		src_buf += src_pitch;
 		buf += pitch;
 	}
-
-#endif
 
 	rects[0].x1 = x;
 	rects[0].y1 = y;
@@ -553,16 +505,15 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamRects(v2d, rects, 1);
 	_Viv2DStreamCommit(v2d);
 
-//	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p", src);
+	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p(%d) %dx%d(%dx%d) %dx%d %d/%d", src, src_pitch, x, y, w, h,
+	              pDst->drawable.width, pDst->drawable.height,
+	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
 
 	Viv2DDetachBo(pARMSOC, armsocPix);
-#ifdef VIV2D_UPLOAD_USERPTR
-	if (!aligned)
-		free(mem);
-	free(srcp->bo);
-#else
+
+	etna_bo_cpu_prep(srcp->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+	VIV2D_DBG_MSG("Viv2DUploadToScreen del bo %p", srcp->bo);
 	etna_bo_del(srcp->bo);
-#endif
 //	VIV2D_DBG_MSG("Viv2DUploadToScreen exit %p", src);
 	return TRUE;
 }
@@ -1154,20 +1105,20 @@ Viv2DCheckComposite (int op,
 
 	if ((pMaskPicture != NULL)) {
 #ifdef VIV2D_MASK_SUPPORT
-/*
-		PixmapPtr pMsk = GetDrawablePixmap(pMaskPicture->pDrawable);
+		/*
+				PixmapPtr pMsk = GetDrawablePixmap(pMaskPicture->pDrawable);
 
-		if (pMsk == NULL) {
-			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported mask is not a drawable");
-			return FALSE;
-		}
+				if (pMsk == NULL) {
+					VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported mask is not a drawable");
+					return FALSE;
+				}
 
 
-		if ( pMaskPicture->repeat) {
-			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask repeat unsupported with mask");
-			return FALSE;
-		}
-		*/
+				if ( pMaskPicture->repeat) {
+					VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask repeat unsupported with mask");
+					return FALSE;
+				}
+				*/
 
 #else
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask unsupported");
@@ -1245,8 +1196,8 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr src = NULL;
-	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDst);
 	Viv2DPixmapPrivPtr msk = NULL;
+	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDst);
 	Viv2DOp *op;
 
 	if (pSrc != NULL) {
@@ -1350,7 +1301,7 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 			op->msk_type = viv2d_src_solid;
 			op->fg = pMaskPicture->pSourcePict->solidFill.color;
 		}
-		
+
 	}
 	v2d->op = op;
 
@@ -1474,10 +1425,12 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		_Viv2DStreamSrc(v2d, &tmp, 0, 0, width, height, FALSE);
 		_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 		_Viv2DStreamBlendOp(v2d, op->blend_op, 0, op->dst_alpha, FALSE, op->dst_alpha_mode_global);
-		VIV2D_DBG_MSG("Viv2DComposite mask %x %d %d -> %d\n", op->fg, op->blend_op->op, op->blend_op->srcBlendMode, op->blend_op->dstBlendMode);
+		VIV2D_DBG_MSG("Viv2DComposite mask %x %d %d -> %d", op->fg, op->blend_op->op, op->blend_op->srcBlendMode, op->blend_op->dstBlendMode);
 		_Viv2DStreamRects(v2d, &drect, 1);
 
 		_Viv2DStreamCommit(v2d); // commit now because of tmp bo
+		etna_bo_cpu_prep(tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+		VIV2D_DBG_MSG("Viv2DComposite del bo %p", tmp.bo);
 		etna_bo_del(tmp.bo);
 	} else {
 		// new srcX,srcY group

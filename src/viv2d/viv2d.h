@@ -13,8 +13,7 @@
 #define VIV2D_MAX_RECTS 256
 
 // experimental stuff
-//#define ETNA_BO_FROM_HANDLE_MISSING 1
-//#define VIV2D_UPLOAD_USERPTR 1
+//#define RAW_ETNA_BO 1
 
 #define VIV2D_DBG_MSG(fmt, ...)
 /*#define VIV2D_DBG_MSG(fmt, ...) \
@@ -22,9 +21,9 @@
 				##__VA_ARGS__); } while (0)
 */
 
-#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
-/*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
-		do { xf86Msg(X_WARNING, fmt "\n",\
+//#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
+/*		do { xf86Msg(X_WARNING, fmt "\n",\
 				##__VA_ARGS__); } while (0)
 */
 
@@ -54,6 +53,157 @@
 #define ROP_SRC_OR_NOT_DST		0xdd
 #define ROP_DST_OR_SRC 			0xee
 #define ROP_WHITE 				0xff
+
+#ifdef RAW_ETNA_BO
+/* 
+	We let armsoc managing DRI2/DRI3. So we do want minimal management for etna_bo, 
+	since we only instanciate once from armsoc_bo dmabuf before
+	operations (Solid/Copy/Compose), and close it immediately after.
+	I have some doubt about the libdrm etnaviv cache management, so we use some cache-free functions.
+*/
+struct etna_bo {
+	struct etna_device *dev;
+	void            *map;           /* userspace mmap'ing (if there is one) */
+	uint32_t        size;
+	uint32_t        handle;
+	uint32_t        flags;
+	uint32_t        name;           /* flink global handle (DRI2 name) */
+	uint64_t        offset;
+	uint32_t        refcnt; // atomic_t
+
+	/* in the common case, a bo won't be referenced by more than a single
+	 * command stream.  So to avoid looping over all the bo's in the
+	 * reloc table to find the idx of a bo that might already be in the
+	 * table, we cache the idx in the bo.  But in order to detect the
+	 * slow-path where bo is ref'd in multiple streams, we also must track
+	 * the current_stream for which the idx is valid.  See bo2idx().
+	 */
+	struct etna_cmd_stream *current_stream;
+	uint32_t idx;
+
+	int reuse;
+	/* list excluded */
+//	struct list_head list;   /* bucket-list entry */
+//	time_t free_time;        /* time when added to bucket-list */
+};
+
+struct etna_device {
+	int fd;
+	uint32_t refcnt;
+/* ... */
+};
+
+// etna_device_fd seems missing in libdrm_etna 2.4.73 ?
+int raw_etna_device_fd(struct etna_device *dev)
+{
+   return dev->fd;
+}
+
+// bare minimal drm alloc
+inline struct etna_bo *raw_etna_bo_alloc(struct etna_device *dev)
+{
+	struct etna_bo *mem;
+
+	mem = calloc(1, sizeof *mem);
+	if (mem) {
+		mem->dev = dev;
+		mem->refcnt = 1;
+		mem->idx = -1;
+		mem->reuse = 0;
+	}
+
+	return mem;
+}
+
+// etna_bo new without cache
+struct etna_bo *raw_etna_bo_new(struct etna_device *dev, uint32_t size,
+		uint32_t flags)
+{
+	struct etna_bo *bo;
+	int ret;
+	struct drm_etnaviv_gem_new req = {
+			.flags = flags,
+	};
+	int dev_fd = raw_etna_device_fd(dev);
+
+	req.size = size;
+	ret = drmCommandWriteRead(dev_fd, DRM_ETNAVIV_GEM_NEW,
+			&req, sizeof(req));
+	if (ret)
+		return NULL;
+
+
+	bo = raw_etna_bo_alloc(dev);
+	if (!bo) {
+		struct drm_gem_close req = {
+			.handle = req.handle,
+		};
+
+		drmIoctl(dev_fd, DRM_IOCTL_GEM_CLOSE, &req);
+
+		return NULL;
+	}
+
+	bo->size = size;
+	bo->flags = flags;
+	bo->handle = req.handle;
+
+	return bo;
+}
+
+// bare minimal drm etna_bo from dmabuf fd
+// no cache management
+inline struct etna_bo *raw_etna_bo_from_dmabuf(struct etna_device *dev, int fd)
+{
+	struct etna_bo *bo;
+	int ret, size;
+	uint32_t handle;
+
+	int dev_fd=raw_etna_device_fd(dev);
+
+	ret = drmPrimeFDToHandle(dev_fd, fd, &handle);
+	if (ret) {
+		return NULL;
+	}
+
+	/* lseek() to get bo size */
+	size = lseek(fd, 0, SEEK_END);
+	lseek(fd, 0, SEEK_CUR);
+
+	bo = raw_etna_bo_alloc(dev);
+	if (!bo) {
+		struct drm_gem_close req = {
+			.handle = handle,
+		};
+
+		drmIoctl(dev_fd, DRM_IOCTL_GEM_CLOSE, &req);
+
+		return NULL;
+	}
+	bo->size = size;
+	bo->handle = handle;
+
+	return bo;
+}
+
+// bare minimal drm etna_bo del
+// original etna_bo_del won't delete everytime because of a cache management
+inline void raw_etna_bo_del(struct etna_bo *bo) {
+	if (bo->map)
+		munmap(bo->map, bo->size);
+
+	if (bo->handle) {
+		int dev_fd=raw_etna_device_fd(bo->dev);
+		struct drm_gem_close req = {
+			.handle = bo->handle,
+		};
+
+		drmIoctl(dev_fd, DRM_IOCTL_GEM_CLOSE, &req);
+	}
+
+	free(bo);
+}
+#endif
 
 typedef struct _Viv2DRect {
 	int x1;
@@ -246,47 +396,5 @@ static inline Viv2DPixmapPrivPtr Viv2DAllocPix(Viv2DRec *v2d,int width, int heig
 	}
 	return vpix;
 }
-
-#ifdef ETNA_BO_FROM_HANDLE_MISSING
-// priv etna_bo structure
-struct etna_bo {
-	struct etna_device      *dev;
-	void            *map;           /* userspace mmap'ing (if there is one) */
-	uint32_t        size;
-	uint32_t        handle;
-	uint32_t        flags;
-	uint32_t        name;           /* flink global handle (DRI2 name) */
-	uint64_t        offset;
-	uint32_t        refcnt; // atomic_t
-
-	/* in the common case, a bo won't be referenced by more than a single
-	 * command stream.  So to avoid looping over all the bo's in the
-	 * reloc table to find the idx of a bo that might already be in the
-	 * table, we cache the idx in the bo.  But in order to detect the
-	 * slow-path where bo is ref'd in multiple streams, we also must track
-	 * the current_stream for which the idx is valid.  See bo2idx().
-	 */
-	struct etna_cmd_stream *current_stream;
-	uint32_t idx;
-
-	int reuse;
-	/* more things we don't need */
-};
-
-
-static struct etna_bo *etna_bo_alloc(struct etna_device *dev)
-{
-	struct etna_bo *mem;
-
-	mem = calloc(1, sizeof *mem);
-	if (mem) {
-		mem->dev = dev;
-		mem->refcnt = 1;
-		mem->idx = -1;
-	}
-	return mem;
-}
-#endif
-
 
 #endif
