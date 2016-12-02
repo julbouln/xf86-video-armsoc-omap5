@@ -267,7 +267,6 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 		Viv2DPixmapPrivPtr pix = privPix->priv;
 
-//		if (pix->bo && pix->bo != v2d->bo) {
 		if (privPix->bo == pARMSOC->scanout) {
 		} else {
 			if (pix->bo) {
@@ -279,12 +278,6 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 				etna_bo_del(pix->bo);
 #endif
 				pix->bo = NULL;
-				/*
-				if (pix->dmaFD) {
-					close(pix->dmaFD);
-					pix->dmaFD = 0;
-				}
-				*/
 			}
 		}
 	}
@@ -339,8 +332,6 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr pix = privPix->priv;
-
-//	VIV2D_DBG_MSG("Viv2DDestroyPixmap");
 
 	Viv2DDetachBo(pARMSOC, privPix);
 
@@ -440,17 +431,11 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	}
 
 	Viv2DAttachBo(pARMSOC, armsocPix);
-	/*
-		VIV2D_DBG_MSG("Viv2DUploadToScreen check %p(%d) %dx%d(%dx%d) %dx%d %d/%d", src, src_pitch, x, y, w, h,
-		              pDst->drawable.width, pDst->drawable.height,
-		              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
-	*/
+
 	Viv2DPixmapPrivRec pix;
 	pix.width = w;
 	pix.height = h;
-//	pix.pitch = OMAPCalculateStride(w, pDst->drawable.bitsPerPixel);
 	pix.pitch = ALIGN(w * ((pDst->drawable.bitsPerPixel + 7) / 8), 32);
-//	pix.pitch = Viv2DPitch(w, pDst->drawable.bitsPerPixel);
 
 	pix.priv = NULL;
 	pix.bo = NULL;
@@ -482,7 +467,6 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	char *buf = (char *) etna_bo_map(srcp->bo);
 
 	while (height--) {
-//		memcpy(buf, src_buf, w * bytesPerPixel);
 		memcpy(buf, src_buf, pitch);
 		src_buf += src_pitch;
 		buf += pitch;
@@ -514,7 +498,6 @@ Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	etna_bo_cpu_prep(srcp->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
 	VIV2D_DBG_MSG("Viv2DUploadToScreen del bo %p", srcp->bo);
 	etna_bo_del(srcp->bo);
-//	VIV2D_DBG_MSG("Viv2DUploadToScreen exit %p", src);
 	return TRUE;
 }
 
@@ -692,8 +675,6 @@ static void Viv2DSolid (PixmapPtr pPixmap, int x1, int y1, int x2, int y2) {
 //		_Viv2DStreamFlush(v2d);
 		op->cur_rect = 0;
 		_Viv2DOpAddRect(op, x1, y1, x2 - x1, y2 - y1);
-
-//		VIV2D_ERR_MSG("Viv2DSolid rects overflow %d >= %d", op->cur_rect, VIV2D_MAX_RECTS);
 	}
 }
 
@@ -1023,12 +1004,6 @@ Viv2DCheckComposite (int op,
 		return FALSE;
 	}
 
-	/*
-		VIV2D_DBG_MSG("Viv2DCheckComposite %d : %dx%d(%s) -> %dx%d(%s)",
-		              op, pSrc->drawable.width, pSrc->drawable.height, pix_format_name(pSrcPicture->format),
-		              pDst->drawable.width, pDst->drawable.height, pix_format_name(pDstPicture->format)
-		             );
-	*/
 	if (pDst->drawable.height < VIV2D_MIN_HW_HEIGHT || pDst->drawable.width * pDst->drawable.height < VIV2D_MIN_HW_SIZE_24BIT) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite dest drawable is too small %dx%d", pDst->drawable.width, pDst->drawable.height);
 		return FALSE;
@@ -1046,14 +1021,6 @@ Viv2DCheckComposite (int op,
 		return FALSE;
 	}
 
-	/*
-		if (pMaskPicture != NULL) {
-			if (!Viv2DGetPictureFormat(pMaskPicture->format, &msk_fmt)) {
-				VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported msk format %s", pix_format_name(pMaskPicture->format));
-				return FALSE;
-			}
-		}
-	*/
 	if (!Viv2DGetPictureFormat(pDstPicture->format, &dst_fmt)) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported dst format %s", pix_format_name(pDstPicture->format));
 		return FALSE;
@@ -1103,28 +1070,12 @@ Viv2DCheckComposite (int op,
 #endif
 	}
 
+#ifndef VIV2D_MASK_SUPPORT
 	if ((pMaskPicture != NULL)) {
-#ifdef VIV2D_MASK_SUPPORT
-		/*
-				PixmapPtr pMsk = GetDrawablePixmap(pMaskPicture->pDrawable);
-
-				if (pMsk == NULL) {
-					VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported mask is not a drawable");
-					return FALSE;
-				}
-
-
-				if ( pMaskPicture->repeat) {
-					VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask repeat unsupported with mask");
-					return FALSE;
-				}
-				*/
-
-#else
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask unsupported");
 		return FALSE;
-#endif
 	}
+#endif
 
 	return TRUE;
 }
@@ -1415,9 +1366,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 			break;
 		}
-//		_Viv2DStreamSrcWithFormat(v2d, op->msk, maskX, maskY, width, height, &op->msk_fmt, FALSE);
-//		_Viv2DStreamSrc(v2d, op->msk, maskX, maskY, width, height, FALSE);
-//		_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 		_Viv2DStreamBlendOp(v2d, msk_op, 0, 0, FALSE, FALSE);
 		_Viv2DStreamRects(v2d, &mrect, 1);
 
@@ -1529,166 +1477,6 @@ PrepareCompositeFail(int op, PicturePtr pSrcPicture, PicturePtr pMaskPicture,
 
 #endif
 
-/**
- * WaitMarker is a required EXA callback but synchronization is
- * performed during OMAPPrepareAccess so this function does not
- * have anything to do at present
- */
-static void
-Viv2DWaitMarker(ScreenPtr pScreen, int marker)
-{
-	/* no-op */
-}
-
-static inline uint32_t idx2op(int index)
-{
-	switch (index) {
-	case EXA_PREPARE_SRC:
-	case EXA_PREPARE_MASK:
-	case EXA_PREPARE_AUX_SRC:
-	case EXA_PREPARE_AUX_MASK:
-		return DRM_ETNA_PREP_READ;
-	case EXA_PREPARE_AUX_DEST:
-	case EXA_PREPARE_DEST:
-	default:
-		return DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE;
-	}
-}
-
-/**
- * PrepareAccess() is called before CPU access to an offscreen pixmap.
- *
- * @param pPix the pixmap being accessed
- * @param index the index of the pixmap being accessed.
- *
- * PrepareAccess() will be called before CPU access to an offscreen pixmap.
- * This can be used to set up hardware surfaces for byteswapping or
- * untiling, or to adjust the pixmap's devPrivate.ptr for the purpose of
- * making CPU access use a different aperture.
- *
- * The index is one of #EXA_PREPARE_DEST, #EXA_PREPARE_SRC,
- * #EXA_PREPARE_MASK, #EXA_PREPARE_AUX_DEST, #EXA_PREPARE_AUX_SRC, or
- * #EXA_PREPARE_AUX_MASK. Since only up to #EXA_NUM_PREPARE_INDICES pixmaps
- * will have PrepareAccess() called on them per operation, drivers can have
- * a small, statically-allocated space to maintain state for PrepareAccess()
- * and FinishAccess() in.  Note that PrepareAccess() is only called once per
- * pixmap and operation, regardless of whether the pixmap is used as a
- * destination and/or source, and the index may not reflect the usage.
- *
- * PrepareAccess() may fail.  An example might be the case of hardware that
- * can set up 1 or 2 surfaces for CPU access, but not 3.  If PrepareAccess()
- * fails, EXA will migrate the pixmap to system memory.
- * DownloadFromScreen() must be implemented and must not fail if a driver
- * wishes to fail in PrepareAccess().  PrepareAccess() must not fail when
- * pPix is the visible screen, because the visible screen can not be
- * migrated.
- *
- * @return TRUE if PrepareAccess() successfully prepared the pixmap for CPU
- * drawing.
- * @return FALSE if PrepareAccess() is unsuccessful and EXA should use
- * DownloadFromScreen() to migate the pixmap out.
- */
-static Bool
-Viv2DPrepareAccess(PixmapPtr pPixmap, int index)
-{
-#if 0
-	Viv2DPixmapPrivPtr priv = Viv2DPixmapPrivFromPixmap(pPixmap);
-	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
-	Viv2DRec *v2d = Viv2DPrivFromPixmap(pPixmap);
-	int state;
-	int prep = idx2op(index);
-
-
-	if (ARMSOCPrepareAccess(pPixmap, index)) {
-
-		/*
-			pPixmap->devPrivate.ptr = etna_bo_map(priv->bo);
-			if (!pPixmap->devPrivate.ptr) {
-				return FALSE;
-			}
-		*/
-		/* wait for blits complete.. note we could be a bit more clever here
-		 * for non-DRI2 buffers and use separate OMAP{Prepare,Finish}GPUAccess()
-		 * fxns wrapping accelerated GPU operations.. this way we don't have
-		 * to prep/fini around each CPU operation, but only when there is an
-		 * intervening GPU operation (or if we go to a stronger op mask, ie.
-		 * first CPU access is READ and second is WRITE).
-		 */
-
-		if (priv->bo) {
-			state = etna_bo_cpu_prep(priv->bo, prep);
-
-			if (state) {
-				return FALSE;
-			}
-		}
-	} else {
-		return FALSE;
-	}
-
-	return TRUE;
-#endif
-	return ARMSOCPrepareAccess(pPixmap, index);
-}
-
-/**
- * FinishAccess() is called after CPU access to an offscreen pixmap.
- *
- * @param pPix the pixmap being accessed
- * @param index the index of the pixmap being accessed.
- *
- * FinishAccess() will be called after finishing CPU access of an offscreen
- * pixmap set up by PrepareAccess().  Note that the FinishAccess() will not be
- * called if PrepareAccess() failed and the pixmap was migrated out.
- */
-static void
-Viv2DFinishAccess(PixmapPtr pPixmap, int index)
-{
-#if 0
-	Viv2DPixmapPrivPtr priv = Viv2DPixmapPrivFromPixmap(pPixmap);
-//	VIV2D_DBG_MSG("Viv2DFinishAccess %d", index);
-
-	pPixmap->devPrivate.ptr = NULL;
-
-	/* NOTE: can we use EXA migration module to track which parts of the
-	 * buffer was accessed by sw, and pass that info down to kernel to
-	 * do a more precise cache flush..
-	 */
-	if (priv->bo) {
-		etna_bo_cpu_fini(priv->bo);
-	}
-	ARMSOCFinishAccess(pPixmap, index);
-#endif
-	return ARMSOCFinishAccess(pPixmap, index);
-}
-
-/**
- * PixmapIsOffscreen() is an optional driver replacement to
- * exaPixmapHasGpuCopy(). Set to NULL if you want the standard behaviour
- * of exaPixmapHasGpuCopy().
- *
- * @param pPix the pixmap
- * @return TRUE if the given drawable is in framebuffer memory.
- *
- * exaPixmapHasGpuCopy() is used to determine if a pixmap is in offscreen
- * memory, meaning that acceleration could probably be done to it, and that it
- * will need to be wrapped by PrepareAccess()/FinishAccess() when accessing it
- * with the CPU.
- */
-static Bool
-Viv2DPixmapIsOffscreen(PixmapPtr pPixmap)
-{
-	/* offscreen means in 'gpu accessible memory', not that it's off the
-	 * visible screen.  We currently have no special constraints, since
-	 * OMAP has a flat memory model (no separate GPU memory).  If
-	 * individual EXA implementation has additional constraints, like
-	 * buffer size or mapping in GPU MMU, it should wrap this function.
-	 */
-//	Viv2DPixmapPrivPtr priv = Viv2DPixmapPrivFromPixmap(pPixmap);
-//	return priv && priv->bo;
-	return ARMSOCPixmapIsOffscreen(pPixmap);
-}
-
 static Bool
 CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 {
@@ -1787,14 +1575,14 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	exa->maxY = 4096;
 
 	/* Required EXA functions: */
-	exa->WaitMarker = Viv2DWaitMarker;
+	exa->WaitMarker = ARMSOCWaitMarker;
 	exa->CreatePixmap2 = Viv2DCreatePixmap;
 	exa->DestroyPixmap = Viv2DDestroyPixmap;
 	exa->ModifyPixmapHeader = Viv2DModifyPixmapHeader;
 
-	exa->PrepareAccess = Viv2DPrepareAccess;
-	exa->FinishAccess = Viv2DFinishAccess;
-	exa->PixmapIsOffscreen = Viv2DPixmapIsOffscreen;
+	exa->PrepareAccess = ARMSOCPrepareAccess;
+	exa->FinishAccess = ARMSOCFinishAccess;
+	exa->PixmapIsOffscreen = ARMSOCPixmapIsOffscreen;
 
 #ifdef VIV2D_COPY
 	exa->PrepareCopy = Viv2DPrepareCopy;
