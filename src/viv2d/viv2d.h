@@ -73,6 +73,7 @@ typedef struct {
 	Bool tiled;
 
 	struct ARMSOCPixmapPrivRec *armsocPix; // armsoc pixmap ref
+	int refcnt;
 } Viv2DPixmapPrivRec, *Viv2DPixmapPrivPtr;
 
 typedef struct _Viv2DBlendOp {
@@ -104,6 +105,8 @@ typedef struct _Viv2DOp {
 	Viv2DPixmapPrivPtr src;
 	Viv2DPixmapPrivPtr msk;
 	Viv2DPixmapPrivPtr dst;
+
+	Viv2DPixmapPrivRec tmp;
 
 	Viv2DFormat msk_fmt;
 
