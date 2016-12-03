@@ -17,13 +17,11 @@
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
 */
-
-//#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
-#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
-/*		do { xf86Msg(X_WARNING, fmt "\n",\
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
+/*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
+		do { xf86Msg(X_WARNING, fmt "\n",\
 				##__VA_ARGS__); } while (0)
 */
-
 //#define VIV2D_INFO_MSG(fmt, ...)
 #define VIV2D_INFO_MSG(fmt, ...) \
 		do { xf86Msg(X_INFO, fmt "\n",\
@@ -111,6 +109,8 @@ typedef struct _Viv2DOp {
 
 	int prev_src_x;
 	int prev_src_y;
+	int prev_width;
+	int prev_height;
 	int cur_rect;
 	Viv2DRect rects[VIV2D_MAX_RECTS];
 
