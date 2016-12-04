@@ -34,6 +34,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "umplock/umplock_ioctl.h"
+#include <sys/ioctl.h>
 
 #include "armsoc_driver.h"
 #include "armsoc_exa.h"
@@ -46,7 +48,6 @@
 #include "viv2d.h"
 #include "viv2d_exa.h"
 #include "viv2d_op.h"
-
 
 //#define VIV2D_STREAM_SIZE 768
 #define VIV2D_STREAM_SIZE 1024
@@ -61,7 +62,11 @@
 #define VIV2D_REPEAT 1
 #define VIV2D_REPEAT_WITH_MASK 1
 
-#define VIV2D_MIN_HW_HEIGHT 64
+#define VIV2D_PER_OP_ATTACH 1
+
+#define VIV2D_PITCH_ALIGN 32
+
+#define VIV2D_MIN_HW_HEIGHT 32
 #define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
@@ -106,8 +111,8 @@ viv2d_pict_format[] = {
 	{PICT_x4r4g4b4, 16, DE_FORMAT_X4R4G4B4, DE_SWIZZLE_ARGB, 0},
 	{PICT_a4b4g4r4, 16, DE_FORMAT_A4R4G4B4, DE_SWIZZLE_ABGR, 4},
 	{PICT_x4b4g4r4, 16, DE_FORMAT_X4R4G4B4, DE_SWIZZLE_ABGR, 0},
-	{PICT_a8, 8, DE_FORMAT_A8, 8},
-	{PICT_c8, 8, DE_FORMAT_INDEX8, 8},
+	{PICT_a8, 8, DE_FORMAT_A8, DE_SWIZZLE_ARGB, 8},
+	{PICT_c8, 8, DE_FORMAT_INDEX8, DE_SWIZZLE_ARGB, 8},
 //	{PICT_a1, 1, DE_FORMAT_MONOCHROME, 1},
 	{NO_PICT_FORMAT, 0, 0, 0}
 	/*END*/
@@ -246,15 +251,17 @@ static int VIV2DDetectDevice(const char *name)
 	return -1;
 }
 
-static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *privPix) {
-	if (privPix) {
-		Viv2DPixmapPrivPtr pix = privPix->priv;
+static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
+	if (armsocPix) {
+		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
-		if (privPix->bo == pARMSOC->scanout) {
+		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
 			if (pix->bo) {
+#ifdef VIV2D_PER_OP_ATTACH
 				etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
-//				VIV2D_DBG_MSG("Viv2DDetachBo del bo %p", pix->bo);
+#endif
+				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p", pix, pix->bo);
 				etna_bo_del(pix->bo);
 				pix->bo = NULL;
 			}
@@ -262,21 +269,22 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 	}
 }
 
-static inline void Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *privPix) {
-//	Viv2DDetachBo(pARMSOC, privPix);
-	if (privPix) {
+static inline void Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
+	if (armsocPix) {
 		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
-		Viv2DPixmapPrivPtr pix = privPix->priv;
+		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
-		if (privPix->bo == pARMSOC->scanout) {
+		if (armsocPix->bo == pARMSOC->scanout) {
 			pix->bo = v2d->bo;
 		} else {
-			int fd = armsoc_bo_get_dmabuf(privPix->bo);
+			int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
 			if (fd) {
 				pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 				close(fd);
+#ifdef VIV2D_PER_OP_ATTACH
 				etna_bo_cpu_fini(pix->bo);
-//				VIV2D_DBG_MSG("Viv2DAttachBo new bo %p", pix->bo);
+#endif
+				VIV2D_DBG_MSG("Viv2DAttachBo attach %p bo:%p", pix, pix->bo);
 			} else {
 				VIV2D_ERR_MSG("Viv2D error: cannot attach bo : %d", fd);
 			}
@@ -342,6 +350,27 @@ static inline Bool Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFor
 	}
 
 	return TRUE;
+}
+
+
+CARD32 Viv2DGetFirstPixel(DrawablePtr pDraw)
+{
+	union { CARD32 c32; CARD16 c16; CARD8 c8; char c; } pixel;
+
+	pDraw->pScreen->GetImage(pDraw, 0, 0, 1, 1, ZPixmap, ~0, &pixel.c);
+
+	switch (pDraw->bitsPerPixel) {
+	case 32:
+		return pixel.c32;
+	case 16:
+		return pixel.c16;
+	case 8:
+	case 4:
+	case 1:
+		return pixel.c8;
+	default:
+		assert(0);
+	}
 }
 
 /*
@@ -413,50 +442,170 @@ static inline const char *Viv2DFormatSwizzleStr(Viv2DFormat *fmt)
 	}
 }
 
+static inline uint32_t idx2op(int index)
+{
+	switch (index) {
+	case EXA_PREPARE_SRC:
+	case EXA_PREPARE_MASK:
+	case EXA_PREPARE_AUX_SRC:
+	case EXA_PREPARE_AUX_MASK:
+		return DRM_ETNA_PREP_READ;
+	case EXA_PREPARE_AUX_DEST:
+	case EXA_PREPARE_DEST:
+	default:
+		return DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE;
+	}
+}
+
 // EXA functions
 _X_EXPORT Bool
 Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
-
+#if 1
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pPixmap);
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
+	Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
-	//if (index == EXA_PREPARE_DEST)
-	{
-		Viv2DPixmapPrivPtr pix = armsocPix->priv;
-		if (pix->refcnt) {
-			VIV2D_DBG_MSG("Viv2DPrepareAccess %p %d", pPixmap, index);
-			_Viv2DStreamCommit(v2d);
-//		Viv2DDetachBo(pARMSOC, armsocPix);
+	VIV2D_DBG_MSG("Viv2DPrepareAccess %p (%dx%d) %d", pPixmap, pix->width, pix->height, index);
+
+
+//	if(armsocPix->bo)
+//		armsoc_bo_cpu_prep(armsocPix->bo, ARMSOC_GEM_READ|ARMSOC_GEM_READ_WRITE);
+	/*		pPixmap->devPrivate.ptr = armsoc_bo_map(armsocPix->bo);
+			if (!pPixmap->devPrivate.ptr) {
+				xf86DrvMsg(-1, X_ERROR, "%s: Failed to map buffer\n", __func__);
+				return FALSE;
+			}
+	*/
+//	if (pix->bo)
+//
+	if (pix->bo && pARMSOC->scanout == armsocPix->bo) {
+		etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+	}
+//		if(pix->bo)
+//			etna_bo_cpu_prep(pix->bo, idx2op(index));
+//	return TRUE;
+	return ARMSOCPrepareAccess(pPixmap, index);
+#endif
+#if 0
+	ScreenPtr pScreen = pPixmap->drawable.pScreen;
+	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	uint32_t dmabuf_name = 0;
+	_lock_item_s item;
+	int ret;
+	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+	Viv2DPixmapPrivPtr pix = priv->priv;
+
+	pPixmap->devPrivate.ptr = etna_bo_map(pix->bo);
+	if (!pPixmap->devPrivate.ptr) {
+		xf86DrvMsg(-1, X_ERROR, "%s: Failed to map buffer\n", __func__);
+		return FALSE;
+	}
+
+	/* Attach dmabuf fd to bo to synchronise access if
+	 * pixmap wrapped by DRI2
+	 */
+	if (priv->ext_access_cnt && !armsoc_bo_has_dmabuf(priv->bo)) {
+		if (armsoc_bo_set_dmabuf(priv->bo)) {
+			xf86DrvMsg(-1, X_ERROR,
+			           "%s: Unable to get dma_buf fd for bo, to enable synchronised CPU access.\n",
+			           __func__);
+			return FALSE;
 		}
 	}
 
-	return ARMSOCPrepareAccess(pPixmap, index);
+	if (-1 != pARMSOC->lockFD) {
+		ret = armsoc_bo_get_name(priv->bo, &dmabuf_name);
+
+		if (ret) {
+			ERROR_MSG("could not get buffer name");
+			return FALSE;
+		}
+
+		item.secure_id = dmabuf_name;
+		item.usage = _LOCK_ACCESS_CPU_WRITE;
+
+		if (ioctl(pARMSOC->lockFD,  LOCK_IOCTL_CREATE, &item) < 0) {
+			ERROR_MSG("Unable to create lock item\n");
+			return FALSE;
+		}
+		if (ioctl(pARMSOC->lockFD, LOCK_IOCTL_PROCESS, &item) < 0) {
+			int max_retries = 5;
+			ERROR_MSG("Unable to process lock item with ID 0x%x - throttling\n", item.secure_id);
+			while ((ioctl(pARMSOC->lockFD, LOCK_IOCTL_PROCESS, &item) < 0) && max_retries) {
+				usleep(2000);
+				max_retries--;
+			}
+			if (max_retries == 0)
+				ERROR_MSG("Warning: Max retries == 0\n");
+		}
+	} else {
+		if (etna_bo_cpu_prep(pix->bo, idx2op(index))) {
+			xf86DrvMsg(-1, X_ERROR,
+			           "%s: armsoc_bo_cpu_prep failed - unable to synchronise access.\n",
+			           __func__);
+			return FALSE;
+		}
+	}
+	return TRUE;
+#endif
 }
 
 _X_EXPORT void
 Viv2DFinishAccess(PixmapPtr pPixmap, int index)
 {
+#if 1
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pPixmap);
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
+	Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
+	VIV2D_DBG_MSG("Viv2DFinishAccess %p (%dx%d) %d (%d)", pPixmap, pix->width, pix->height, index, pix->refcnt);
 
-
+//	pPixmap->devPrivate.ptr = NULL;
 	ARMSOCFinishAccess(pPixmap, index);
 
-	//if (index == EXA_PREPARE_DEST)
-	{
-		Viv2DPixmapPrivPtr pix = armsocPix->priv;
-		if (pix->refcnt) {
-			VIV2D_DBG_MSG("Viv2DFinishAccess %p %d (%d)", pPixmap, index, pix->refcnt);
-			pix->refcnt = 0;
-//		Viv2DAttachBo(pARMSOC, armsocPix);
-		}
+//	if (pix->bo)
+	if (pix->bo && pARMSOC->scanout == armsocPix->bo) {
+		etna_bo_cpu_fini(pix->bo);
 	}
 
+//	if(armsocPix->bo)
+//		armsoc_bo_cpu_fini(armsocPix->bo, ARMSOC_GEM_READ|ARMSOC_GEM_READ_WRITE);
+#endif
+#if 0
+	ScreenPtr pScreen = pPixmap->drawable.pScreen;
+	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	Viv2DPixmapPrivPtr pix = priv->priv;
+
+	if (-1 != pARMSOC->lockFD) {
+		uint32_t dmabuf_name = 0;
+		_lock_item_s item;
+		int ret;
+
+		pPixmap->devPrivate.ptr = NULL;
+		ret = armsoc_bo_get_name(priv->bo, &dmabuf_name);
+		if (ret) {
+			ERROR_MSG("could not get buffer name");
+			return ;
+		}
+		item.secure_id = dmabuf_name;
+		item.usage = _LOCK_ACCESS_CPU_WRITE;
+		ioctl(pARMSOC->lockFD, LOCK_IOCTL_RELEASE, &item);
+	} else {
+		/* NOTE: can we use EXA migration module to track which parts of the
+		 * buffer was accessed by sw, and pass that info down to kernel to
+		 * do a more precise cache flush..
+		 */
+		pPixmap->devPrivate.ptr = NULL;
+		etna_bo_cpu_fini(pix->bo);
+	}
+#endif
 }
 
 static void *
@@ -464,12 +613,14 @@ Viv2DCreatePixmap (ScreenPtr pScreen, int width, int height,
                    int depth, int usage_hint, int bitsPerPixel,
                    int *new_fb_pitch)
 {
-	struct ARMSOCPixmapPrivRec *privPix = ARMSOCCreatePixmap2(pScreen, width, height, depth,
-	                                      usage_hint, bitsPerPixel, new_fb_pitch);
+	struct ARMSOCPixmapPrivRec *armsocPix = ARMSOCCreatePixmap2(pScreen, width, height, depth,
+	                                        usage_hint, bitsPerPixel, new_fb_pitch);
 	Viv2DPixmapPrivPtr pix = calloc(sizeof(Viv2DPixmapPrivRec), 1);
-	privPix->priv = pix;
-	pix->armsocPix = privPix;
-	return privPix;
+	VIV2D_DBG_MSG("Viv2DCreatePixmap pix %p", pix);
+
+	armsocPix->priv = pix;
+	pix->armsocPix = armsocPix;
+	return armsocPix;
 }
 
 static void
@@ -477,15 +628,16 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	struct ARMSOCPixmapPrivRec *privPix = driverPriv;
+	struct ARMSOCPixmapPrivRec *armsocPix = driverPriv;
 
-	Viv2DPixmapPrivPtr pix = privPix->priv;
+	Viv2DPixmapPrivPtr pix = armsocPix->priv;
+	VIV2D_DBG_MSG("Viv2DDestroyPixmap pix %p", pix);
 
-	Viv2DDetachBo(pARMSOC, privPix);
+	Viv2DDetachBo(pARMSOC, armsocPix);
 
 	free(pix);
-	privPix->priv = NULL;
-	ARMSOCDestroyPixmap(pScreen, privPix);
+	armsocPix->priv = NULL;
+	ARMSOCDestroyPixmap(pScreen, armsocPix);
 }
 
 static Bool
@@ -498,33 +650,38 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
+	Viv2DPixmapPrivPtr pix = armsocPix->priv;
+
 	if (ARMSOCModifyPixmapHeader(pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData)) {
-		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 		if (pPixData == armsoc_bo_map(pARMSOC->scanout) && pix->bo != v2d->bo) {
 			pix->width = armsoc_bo_width(pARMSOC->scanout);
 			pix->height = armsoc_bo_height(pARMSOC->scanout);
 			pix->pitch = armsoc_bo_pitch(pARMSOC->scanout);
 			pix->bo = v2d->bo;
-			VIV2D_DBG_MSG("Viv2DModifyPixmapHeader pix bo scanout");
+			VIV2D_DBG_MSG("Viv2DModifyPixmapHeader pix bo scanout %p", pPixmap);
 		} else {
 			if (armsocPix->bo) {
-//			if (pix->width != armsoc_bo_width(armsocPix->bo) ||
-//			        pix->height != armsoc_bo_height(armsocPix->bo) ||
-//			        pix->pitch != armsoc_bo_pitch(armsocPix->bo)) {
+				if (pix->width != armsoc_bo_width(armsocPix->bo) ||
+				        pix->height != armsoc_bo_height(armsocPix->bo) ||
+				        pix->pitch != armsoc_bo_pitch(armsocPix->bo)) {
 
-//				Viv2DDetachBo(pARMSOC, armsocPix);
-				pix->width = armsoc_bo_width(armsocPix->bo);
-				pix->height = armsoc_bo_height(armsocPix->bo);
-				pix->pitch = armsoc_bo_pitch(armsocPix->bo);
-//				Viv2DAttachBo(pARMSOC, armsocPix);
+					VIV2D_DBG_MSG("Viv2DModifyPixmapHeader %p/%p %dx%d[%d] -> %dx%d[%d]", pPixmap, pix,
+					              pix->width, pix->height, pix->pitch,
+					              armsoc_bo_width(armsocPix->bo), armsoc_bo_height(armsocPix->bo), armsoc_bo_pitch(armsocPix->bo)
+					             );
+					pix->width = armsoc_bo_width(armsocPix->bo);
+					pix->height = armsoc_bo_height(armsocPix->bo);
+					pix->pitch = armsoc_bo_pitch(armsocPix->bo);
+#ifndef VIV2D_PER_OP_ATTACH
+					Viv2DDetachBo(pARMSOC, armsocPix);
+					Viv2DAttachBo(pARMSOC, armsocPix);
+#endif
+				}
 			}
-
-//			}
 		}
 	} else {
-		if (armsocPix->bo) {
-//			Viv2DDetachBo(pARMSOC, armsocPix);
-
+		if (pix->bo) {
+			Viv2DDetachBo(pARMSOC, armsocPix);
 		}
 		return FALSE;
 	}
@@ -601,7 +758,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 	pix.width = w;
 	pix.height = h;
-	pix.pitch = ALIGN(w * ((pDst->drawable.bitsPerPixel + 7) / 8), 32);
+	pix.pitch = ALIGN(w * ((pDst->drawable.bitsPerPixel + 7) / 8), VIV2D_PITCH_ALIGN);
 	pix.bo = NULL;
 
 	pitch = pix.pitch;
@@ -622,8 +779,9 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	rects[0].x2 = x + w;
 	rects[0].y2 = y + h;
 
+#ifdef VIV2D_PER_OP_ATTACH
 	Viv2DAttachBo(pARMSOC, armsocPix);
-
+#endif
 	_Viv2DStreamReserve(v2d->stream, 12 + 14 + 2 + 2 + 2);
 	_Viv2DStreamSrc(v2d, &pix, 0, 0, pix.width, pix.height); // tmp source
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
@@ -631,8 +789,9 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamRects(v2d, rects, 1);
 	_Viv2DStreamCommit(v2d);
 
+#ifdef VIV2D_PER_OP_ATTACH
 	Viv2DDetachBo(pARMSOC, armsocPix);
-
+#endif
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p(%d) %dx%d(%dx%d) %dx%d %d/%d", pDst, src, src_pitch, x, y, w, h,
 	              pDst->drawable.width, pDst->drawable.height,
 	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
@@ -710,7 +869,7 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
                                int alu, Pixel planemask, Pixel fg) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	struct ARMSOCPixmapPrivRec *privPix = exaGetPixmapDriverPrivate(pPixmap);
+	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pPixmap);
@@ -743,11 +902,12 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 	op->dst = dst;
 	v2d->op = op;
 
-	Viv2DAttachBo(pARMSOC, privPix);
-
-	VIV2D_DBG_MSG("Viv2DPrepareSolid %p %p %dx%d, %x %x %d, %d %p", pPixmap, dst,
-	              pPixmap->drawable.width, pPixmap->drawable.height, op->fg ,
-	              op->mask, pPixmap->drawable.depth, alu, dst);
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DAttachBo(pARMSOC, armsocPix);
+#endif
+	VIV2D_DBG_MSG("Viv2DPrepareSolid dst:%p/%p %dx%d, fg:%x mask:%x depth:%d alu:%d", pPixmap,
+	              dst, pPixmap->drawable.width, pPixmap->drawable.height, op->fg ,
+	              op->mask, pPixmap->drawable.depth, alu);
 
 	return TRUE;
 }
@@ -803,7 +963,7 @@ static void Viv2DSolid (PixmapPtr pPixmap, int x1, int y1, int x2, int y2) {
 static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	struct ARMSOCPixmapPrivRec *privPix = exaGetPixmapDriverPrivate(pPixmap);
+	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DOp *op = v2d->op;
@@ -813,12 +973,13 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	_Viv2DStreamColor(v2d, op->fg);
 	_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
 
-	VIV2D_DBG_MSG("Viv2DDoneSolid %p %d", pPixmap, v2d->stream->offset);
+	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
 
 //	_Viv2DStreamCommit(v2d);
 
-	Viv2DDetachBo(pARMSOC, privPix);
-
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DDetachBo(pARMSOC, armsocPix);
+#endif
 	_Viv2DOpDestroy(op);
 	v2d->op = NULL;
 }
@@ -911,12 +1072,13 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 	op->dst = dst;
 	v2d->op = op;
 
+#ifdef VIV2D_PER_OP_ATTACH
 	Viv2DAttachBo(pARMSOC, armsocSrcPix);
 	Viv2DAttachBo(pARMSOC, armsocDstPix);
-
-	VIV2D_DBG_MSG("Viv2DPrepareCopy %p src:%p(%dx%d)[%s/%s] dst:%p(%dx%d)[%s/%s] dir:%dx%d alu:%d planemask:%x", pDstPixmap,
-	              src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
-	              dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
+#endif
+	VIV2D_DBG_MSG("Viv2DPrepareCopy  src:%p/%p(%dx%d)[%s/%s] dst:%p/%p(%dx%d)[%s/%s] dir:%dx%d alu:%d planemask:%x",
+	              pSrcPixmap, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
+	              pDstPixmap, dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
 	              dx, dy, alu, (uint32_t)planemask);
 
 	return TRUE;
@@ -1003,13 +1165,14 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 //	_Viv2DStreamBlendOp(v2d, op->blend_op, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
 
-	VIV2D_DBG_MSG("Viv2DDoneCopy %p %d", pDstPixmap, v2d->stream->offset);
+	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
 
 	_Viv2DStreamCommit(v2d);
 
+#ifdef VIV2D_PER_OP_ATTACH
 	Viv2DDetachBo(pARMSOC, op->src->armsocPix);
 	Viv2DDetachBo(pARMSOC, op->dst->armsocPix);
-
+#endif
 	_Viv2DOpDestroy(op);
 	v2d->op = NULL;
 }
@@ -1043,7 +1206,7 @@ GetDrawablePixmap(DrawablePtr pDrawable) {
 	return (PixmapPtr) pDrawable;
 }
 
-static Bool Viv2DGetPictureFormat(int exa_fmt, Viv2DFormat *fmt) {
+static Bool Viv2DGetPictureFormat(int exa_fmt, Viv2DFormat * fmt) {
 	int i;
 	Bool isFound = FALSE;
 	int size = VIV2D_PICT_FORMAT_COUNT;
@@ -1093,11 +1256,16 @@ Viv2DCheckComposite (int op,
                      PicturePtr pSrcPicture,
                      PicturePtr pMaskPicture, PicturePtr pDstPicture) {
 	PixmapPtr pSrc = GetDrawablePixmap(pSrcPicture->pDrawable);
+	PixmapPtr pMask = NULL;
 	PixmapPtr pDst = GetDrawablePixmap(pDstPicture->pDrawable);
 
 	Viv2DFormat src_fmt;
 //	Viv2DFormat msk_fmt;
 	Viv2DFormat dst_fmt;
+
+	if (pMaskPicture) {
+		pMask = GetDrawablePixmap(pMaskPicture->pDrawable);
+	}
 
 	if (pDst == NULL) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported dest is not a drawable");
@@ -1124,6 +1292,7 @@ Viv2DCheckComposite (int op,
 #endif
 	}
 
+
 	/*For forward compatibility*/
 	if (op > PictOpSaturate) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite op unsupported : %d", op);
@@ -1147,23 +1316,55 @@ Viv2DCheckComposite (int op,
 		return FALSE;
 	}
 
+	if ( pSrcPicture->transform ) {
+		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite src transform unsupported");
+		return FALSE;
+	}
+
 	if (pMaskPicture && pMaskPicture->transform) {
+		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask transform unsupported");
 		return FALSE;
 	}
 
 	if (pMaskPicture && pMaskPicture->componentAlpha) {
+		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask with component alpha unsupported");
 		return FALSE;
 	}
 
-	if (pMaskPicture && pMaskPicture->repeat) {
-		return FALSE;
-	}
+	/*
+		if (pMaskPicture && pMaskPicture->repeat) {
 
-	if ( pSrcPicture->transform ) {
-		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite transform unsupported");
-		return FALSE;
-	}
+			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask with repeat unsupported");
+			return FALSE;
+		}
+	*/
 
+	if (pMaskPicture) {
+		if (pMask == NULL) {
+#ifdef VIV2D_SOLID_PICTURE
+			SourcePict *sp = pMaskPicture->pSourcePict;
+
+			if (sp->type == SourcePictTypeSolidFill) {
+			} else {
+				VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported msk is not a drawable : %d", sp->type);
+				return FALSE;
+			}
+#else
+			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported msk is not a drawable");
+			return FALSE;
+#endif
+		}
+
+		if (pMaskPicture->repeat && pMask) {
+			if (pMask->drawable.width == 1 && pMask->drawable.height == 1) {
+				// 1x1 stretch
+			} else {
+				VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask repeat > 1x1 unsupported");
+				return FALSE;
+			}
+
+		}
+	}
 	if ( pSrcPicture->repeat && pSrc) {
 #ifdef VIV2D_REPEAT
 #ifndef VIV2D_REPEAT_WITH_MASK
@@ -1267,11 +1468,15 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	Viv2DOp *op;
 //	dst->refcnt++;
 
+	Viv2DFormat src_fmt;
+	Viv2DFormat msk_fmt;
+	Viv2DFormat dst_fmt;
+
 	if (pSrc != NULL) {
 		armsocSrcPix = exaGetPixmapDriverPrivate(pSrc);
 		src = Viv2DPixmapPrivFromPixmap(pSrc);
 
-		if (!Viv2DGetPictureFormat(pSrcPicture->format, &src->format)) {
+		if (!Viv2DGetPictureFormat(pSrcPicture->format, &src_fmt)) {
 			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported src format %s", pix_format_name(pSrcPicture->format));
 			return FALSE;
 		}
@@ -1283,32 +1488,36 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		return FALSE;
 	}
 
-	op = _Viv2DOpCreate();
-
 	if (pMask != NULL) {
 		armsocMaskPix = exaGetPixmapDriverPrivate(pMask);
 		msk = Viv2DPixmapPrivFromPixmap(pMask);
 
 //		Viv2DGetPictureFormat(pMaskPicture->format, &op->msk_fmt);
+	}
 
-		if (!Viv2DGetPictureFormat(pMaskPicture->format, &op->msk_fmt)) {
+	if (pMaskPicture != NULL) {
+		if (!Viv2DGetPictureFormat(pMaskPicture->format, &msk_fmt)) {
 			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported msk format %s", pix_format_name(pMaskPicture->format));
 			return FALSE;
 		}
-
 	}
+
+	op = _Viv2DOpCreate();
+	op->msk_fmt = msk_fmt;
+	op->src_fmt = src_fmt;
 
 	if (src != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p-%p(%dx%d)[%s/%s]",
-		              pSrcPicture, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format));
+		src->format = src_fmt;
+		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d)[%s/%s]",
+		              pSrc, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format));
 	}
 	if (msk != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p-%p(%dx%d)[%s/%s]",
-		              pMaskPicture, msk, msk->width, msk->height, Viv2DFormatColorStr(&op->msk_fmt), Viv2DFormatSwizzleStr(&op->msk_fmt));
+		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p/%p(%dx%d)[%s/%s]",
+		              pMask, msk, msk->width, msk->height, Viv2DFormatColorStr(&op->msk_fmt), Viv2DFormatSwizzleStr(&op->msk_fmt));
 	}
 
-	VIV2D_DBG_MSG("Viv2DPrepareComposite %p dst:%p-%p(%dx%d)[%s/%s] op:%d(%s)", pDst,
-	              pDstPicture, dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
+	VIV2D_DBG_MSG("Viv2DPrepareComposite dst:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pDst,
+	              dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
 	              rop, pix_op_name(rop));
 
 	op->blend_op = &viv2d_blend_op[rop];
@@ -1322,13 +1531,21 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	op->src_alpha = 0x00;
 	op->dst_alpha = 0x00;
 
-	if (src) {
-		if (Viv2DFixNonAlpha(&src->format)) {
+	if (pSrcPicture != NULL) {
+		if (Viv2DFixNonAlpha(&src_fmt)) {
 			op->src_alpha_mode_global = TRUE;
 			op->src_alpha = 0xff;
 		}
 	}
 
+	/*
+		if (pMaskPicture) {
+			if (Viv2DFixNonAlpha(&op->msk_fmt)) {
+				op->msk_alpha_mode_global = TRUE;
+				op->msk_alpha = 0xff;
+			}
+		}
+	*/
 	if (Viv2DFixNonAlpha(&dst->format)) {
 		op->dst_alpha_mode_global = TRUE;
 		op->dst_alpha = 0xff;
@@ -1348,7 +1565,12 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 	if (pSrc != NULL && pSrcPicture->repeat && pSrc->drawable.width == 1 && pSrc->drawable.height == 1) {
 		op->src_type = viv2d_src_1x1_repeat;
+
+// armada way
+//		op->src_type = viv2d_src_solid;
+//		op->fg = Viv2DGetFirstPixel(&pSrc->drawable);
 	}
+
 
 	if (pSrc == NULL && pSrcPicture->pSourcePict->type == SourcePictTypeSolidFill) {
 		op->src_type = viv2d_src_solid;
@@ -1361,20 +1583,25 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 		if (pMask != NULL && pMaskPicture->repeat && pMask->drawable.width == 1 && pMask->drawable.height == 1) {
 			op->msk_type = viv2d_src_1x1_repeat;
+
+// armada way
+//		op->msk_type = viv2d_src_solid;
+//		op->mask = Viv2DGetFirstPixel(&pMask->drawable);
 		}
 
 		if (pMask == NULL && pMaskPicture->pSourcePict->type == SourcePictTypeSolidFill) {
 			op->msk_type = viv2d_src_solid;
-			op->fg = pMaskPicture->pSourcePict->solidFill.color;
+			op->mask = pMaskPicture->pSourcePict->solidFill.color;
 		}
 
 	}
 	v2d->op = op;
 
+#ifdef VIV2D_PER_OP_ATTACH
 	Viv2DAttachBo(pARMSOC, armsocSrcPix);
 	Viv2DAttachBo(pARMSOC, armsocMaskPix);
 	Viv2DAttachBo(pARMSOC, armsocDstPix);
-
+#endif
 	return TRUE;
 }
 
@@ -1421,15 +1648,15 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
 		Viv2DBlendOp *msk_op = &viv2d_blend_op[PictOpInReverse];
 		Viv2DRect mrect, drect;
-		int pitch = ALIGN(width * ((32 + 7) / 8), 32);
+		int pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
 
 		if (op->tmp.bo) {
 			if (op->tmp.width != width || op->tmp.height != height) {
 				// commit because of previous tmp
-				_Viv2DStreamCommit(v2d);
+//				_Viv2DStreamCommit(v2d);
 				etna_bo_cpu_prep(op->tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
 				etna_bo_del(op->tmp.bo);
-				op->tmp.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+				op->tmp.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_WC);
 			}
 
 		} else {
@@ -1451,11 +1678,11 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		drect.x2 = dstX + width;
 		drect.y2 = dstY + height;
 
-		_Viv2DStreamReserveComp(v2d->stream, op->src_type, 1);
+		_Viv2DStreamReserveComp(v2d->stream, op->src_type, 1, TRUE);
 
 		switch (op->src_type) {
 		case viv2d_src_1x1_repeat:
-			_Viv2DStreamSrc(v2d, op->src, 0, 0, 1, 1);
+			_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
 			_Viv2DStreamStretch(v2d, op->src, op->dst);
 			_Viv2DStreamDst(v2d, &op->tmp, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
 			break;
@@ -1464,14 +1691,14 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			_Viv2DStreamColor(v2d, op->fg);
 			break;
 		default:
-			_Viv2DStreamSrc(v2d, op->src, srcX, srcY, width, height);
+			_Viv2DStreamSrcWithFormat(v2d, op->src, srcX, srcY, width, height, &op->src_fmt);
 			_Viv2DStreamDst(v2d, &op->tmp, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 			break;
 		}
 		_Viv2DStreamBlendOp(v2d, cpy_op, op->src_alpha, 0, op->src_alpha_mode_global, FALSE);
 		_Viv2DStreamRects(v2d, &mrect, 1);
 
-		_Viv2DStreamReserveComp(v2d->stream, op->msk_type, 1);
+		_Viv2DStreamReserveComp(v2d->stream, op->msk_type, 1, TRUE);
 
 		// apply msk with mask op to tmp
 		switch (op->msk_type) {
@@ -1482,7 +1709,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			break;
 		case viv2d_src_solid:
 			_Viv2DStreamDst(v2d, &op->tmp, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
-			_Viv2DStreamColor(v2d, op->fg);
+			_Viv2DStreamColor(v2d, op->mask);
 			break;
 		default:
 			_Viv2DStreamSrcWithFormat(v2d, op->msk, maskX, maskY, width, height, &op->msk_fmt);
@@ -1508,11 +1735,11 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		if (op->prev_src_x != srcX || op->prev_src_y != srcY || op->cur_rect >= VIV2D_MAX_RECTS) {
 			// stream previous rects
 			if (op->prev_src_x > -1) {
-				_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect);
+				_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
 				// create states for srcX,srcY group
 				switch (op->src_type) {
 				case viv2d_src_1x1_repeat:
-					_Viv2DStreamSrc(v2d, op->src, 0, 0, 1, 1);
+					_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
 					_Viv2DStreamStretch(v2d, op->src, op->dst);
 					_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
 					break;
@@ -1521,7 +1748,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 					_Viv2DStreamColor(v2d, op->fg);
 					break;
 				default:
-					_Viv2DStreamSrc(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height);
+					_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
 					_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 					break;
 				}
@@ -1562,13 +1789,15 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 	Viv2DOp *op = v2d->op;
 
 	if (op->msk) {
+		VIV2D_DBG_MSG("Viv2DDoneComposite with msk dst:%p %d", pDst, v2d->stream->offset);
 		// already done masked operations
+//		_Viv2DStreamCommit(v2d);
 	} else {
-		_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect);
+		_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
 		// create states for srcX,srcY group
 		switch (op->src_type) {
 		case viv2d_src_1x1_repeat:
-			_Viv2DStreamSrc(v2d, op->src, 0, 0, 1, 1);
+			_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
 			_Viv2DStreamStretch(v2d, op->src, op->dst);
 			_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
 			break;
@@ -1577,7 +1806,7 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 			_Viv2DStreamColor(v2d, op->fg);
 			break;
 		default:
-			_Viv2DStreamSrc(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height);
+			_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
 			_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 			break;
 		}
@@ -1585,21 +1814,21 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 
 		_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
 
-		VIV2D_DBG_MSG("Viv2DDoneComposite %p %d", pDst, v2d->stream->offset);
+		VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
 		_Viv2DStreamCommit(v2d);
 	}
 
+#ifdef VIV2D_PER_OP_ATTACH
 	if (op->src)
 		Viv2DDetachBo(pARMSOC, op->src->armsocPix);
 	if (op->msk)
 		Viv2DDetachBo(pARMSOC, op->msk->armsocPix);
 
 	Viv2DDetachBo(pARMSOC, op->dst->armsocPix);
-
+#endif
 	if (op->tmp.bo) {
 		etna_bo_del(op->tmp.bo);
 	}
-
 
 	_Viv2DOpDestroy(op);
 	v2d->op = NULL;
@@ -1713,12 +1942,19 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	exa->exa_major = EXA_VERSION_MAJOR;
 	exa->exa_minor = EXA_VERSION_MINOR;
 
-	exa->pixmapOffsetAlign = 0;
-	exa->pixmapPitchAlign = 32 * 4; // see OMAPCalculateStride()
+//	exa->pixmapOffsetAlign = 0;
+//	exa->pixmapPitchAlign = 32 * 4;
+
+	exa->pixmapOffsetAlign = 64;
+	exa->pixmapPitchAlign = 256;
+
 	exa->flags = EXA_OFFSCREEN_PIXMAPS |
 	             EXA_HANDLES_PIXMAPS | EXA_SUPPORTS_PREPARE_AUX;
-	exa->maxX = 4096;
-	exa->maxY = 4096;
+//	exa->maxX = 4096;
+//	exa->maxY = 4096;
+
+	exa->maxX = 2048;
+	exa->maxY = 2048;
 
 	/* Required EXA functions: */
 	exa->WaitMarker = ARMSOCWaitMarker;
@@ -1726,11 +1962,15 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	exa->DestroyPixmap = Viv2DDestroyPixmap;
 	exa->ModifyPixmapHeader = Viv2DModifyPixmapHeader;
 
-//	exa->PrepareAccess = Viv2DPrepareAccess;
-//	exa->FinishAccess = Viv2DFinishAccess;
 
+#ifdef VIV2D_PER_OP_ATTACH
 	exa->PrepareAccess = ARMSOCPrepareAccess;
 	exa->FinishAccess = ARMSOCFinishAccess;
+#else
+	exa->PrepareAccess = Viv2DPrepareAccess;
+	exa->FinishAccess = Viv2DFinishAccess;
+#endif
+
 	exa->PixmapIsOffscreen = ARMSOCPixmapIsOffscreen;
 
 #ifdef VIV2D_COPY

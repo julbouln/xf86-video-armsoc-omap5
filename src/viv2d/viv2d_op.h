@@ -69,10 +69,11 @@ static inline void _Viv2DStreamReserve(struct etna_cmd_stream *stream, size_t n)
 	if (etna_cmd_stream_avail(stream) < n) {
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(stream), n, stream->offset);
 		etna_cmd_stream_flush(stream);
+//		etna_cmd_stream_finish(stream);
 	}
 }
 
-static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int src_type, int cur_rect) {
+static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int src_type, int cur_rect, Bool blend) {
 	int reserve = 0;
 	switch (src_type) {
 	case viv2d_src_1x1_repeat:
@@ -86,7 +87,8 @@ static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int s
 		break;
 	}
 	reserve += 14; // dest
-	reserve += 10; // blend
+	if(blend)
+		reserve += 10; // blend
 	reserve += cur_rect * 2 + 2;
 
 	_Viv2DStreamReserve(stream, reserve);
@@ -94,7 +96,6 @@ static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int s
 
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d) {
 //	VIV2D_INFO_MSG("_Viv2DStreamCommit %d",v2d->stream->offset);
-//	etna_cmd_stream_finish(v2d->stream);
 	/*
 		_Viv2DStreamReserve(v2d->stream,40);
 		int i;
@@ -104,6 +105,7 @@ static inline void _Viv2DStreamCommit(Viv2DPtr v2d) {
 			etna_cmd_stream_emit(v2d->stream, 0);
 		}
 	*/
+//	etna_cmd_stream_finish(v2d->stream);
 	etna_cmd_stream_flush(v2d->stream);
 }
 
@@ -203,8 +205,6 @@ static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rec
 			etna_cmd_stream_emit(v2d->stream, VIV_FE_DRAW_2D_BOTTOM_RIGHT_X(tmprect.x2) |
 			                     VIV_FE_DRAW_2D_BOTTOM_RIGHT_Y(tmprect.y2));
 		}
-//		_Viv2DStreamCommit(v2d);
-//		etna_cmd_stream_flush(v2d->stream);
 	} else {
 //		VIV2D_ERR_MSG("empty cur_rect!");
 
