@@ -59,6 +59,7 @@ typedef struct _Viv2DRect {
 typedef struct _Viv2DFormat {
 	int exaFmt;
 	int bpp;
+	int depth;
 	unsigned int fmt;
 	int swizzle;
 	int alphaBits;
@@ -97,8 +98,10 @@ typedef struct _Viv2DOp {
 	uint32_t fg;
 	uint32_t mask;
 
+	uint8_t msk_alpha;
 	uint8_t src_alpha;
 	uint8_t dst_alpha;
+	Bool msk_alpha_mode_global;
 	Bool src_alpha_mode_global;
 	Bool dst_alpha_mode_global;
 
