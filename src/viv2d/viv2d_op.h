@@ -87,8 +87,10 @@ static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int s
 		break;
 	}
 	reserve += 14; // dest
-	if(blend)
+	if (blend)
 		reserve += 10; // blend
+	else
+		reserve += 2;
 	reserve += cur_rect * 2 + 2;
 
 	_Viv2DStreamReserve(stream, reserve);
@@ -135,6 +137,8 @@ static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr sr
 	               VIVS_DE_SRC_SIZE_X(width) |
 	               VIVS_DE_SRC_SIZE_Y(height)
 	              ); // source size is ignored
+	VIV2D_DBG_MSG("_Viv2DStreamSrcWithFormat src:%p x:%d y:%d width:%d height:%d fmt:%s/%s",
+	              src, srcX, srcY, width, height, Viv2DFormatColorStr(format), Viv2DFormatSwizzleStr(format));
 }
 static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height) {
 	_Viv2DStreamSrcWithFormat( v2d,  src,  srcX,  srcY,  width,  height, &src->format);
@@ -176,6 +180,8 @@ static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd
 		               VIVS_DE_CLIP_BOTTOM_RIGHT_Y(dst->height)
 		              );
 	}
+	VIV2D_DBG_MSG("_Viv2DStreamDst dst:%p fmt:%s/%s",
+	              dst, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
 }
 
 static inline void _Viv2DStreamStretch(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst) {
@@ -216,17 +222,17 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 		uint32_t alpha_mode = VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_NORMAL |
 		                      VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_NORMAL;
 
-//		_Viv2DStreamReserve(v2d->stream, 10);
-		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
-		               VIVS_DE_ALPHA_CONTROL_ENABLE_ON |
-		               VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_SRC_ALPHA(src_alpha) |
-		               VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_DST_ALPHA(dst_alpha));
-
 		if (src_global)
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_GLOBAL;
 
 		if (dst_global)
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_GLOBAL;
+
+//		_Viv2DStreamReserve(v2d->stream, 10);
+		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
+		               VIVS_DE_ALPHA_CONTROL_ENABLE_ON |
+		               VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_SRC_ALPHA(src_alpha) |
+		               VIVS_DE_ALPHA_CONTROL_PE10_GLOBAL_DST_ALPHA(dst_alpha));
 
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES,
 		               alpha_mode |
@@ -241,10 +247,14 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 		               VIVS_DE_COLOR_MULTIPLY_MODES_DST_PREMULTIPLY_DISABLE |
 		               VIVS_DE_COLOR_MULTIPLY_MODES_SRC_GLOBAL_PREMULTIPLY_DISABLE |
 		               VIVS_DE_COLOR_MULTIPLY_MODES_DST_DEMULTIPLY_DISABLE);
+
+		VIV2D_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
+
 	} else {
 //		_Viv2DStreamReserve(v2d->stream, 2);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
 		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
+		VIV2D_DBG_MSG("_Viv2DStreamBlendOp disabled");
 	}
 }
 
@@ -256,6 +266,7 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, unsigned int color) {
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_BYTE_MASK, 0xff);
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_LOW, color);
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_HIGH, color);
+	VIV2D_DBG_MSG("_Viv2DStreamColor color:%x", color);
 }
 
 #endif
