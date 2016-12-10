@@ -97,17 +97,8 @@ static inline void _Viv2DStreamReserveComp(struct etna_cmd_stream *stream, int s
 }
 
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d) {
-//	VIV2D_INFO_MSG("_Viv2DStreamCommit %d",v2d->stream->offset);
-	/*
-		_Viv2DStreamReserve(v2d->stream,40);
-		int i;
-
-		for (i = 0; i < 20; i++) {
-			etna_cmd_stream_emit(v2d->stream, VIV_FE_NOP_HEADER_OP_NOP);
-			etna_cmd_stream_emit(v2d->stream, 0);
-		}
-	*/
 //	etna_cmd_stream_finish(v2d->stream);
+	VIV2D_DBG_MSG("_Viv2DStreamCommit %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	etna_cmd_stream_flush(v2d->stream);
 }
 
@@ -215,6 +206,8 @@ static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rec
 //		VIV2D_ERR_MSG("empty cur_rect!");
 
 	}
+
+	VIV2D_DBG_MSG("_Viv2DStreamRects %d", cur_rect);
 }
 
 static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uint8_t src_alpha, uint8_t dst_alpha, Bool src_global, Bool dst_global) {
@@ -224,9 +217,10 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 
 		if (src_global)
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_GLOBAL;
-
+//			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_SCALED;
 		if (dst_global)
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_GLOBAL;
+//			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_SCALED;
 
 //		_Viv2DStreamReserve(v2d->stream, 10);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
