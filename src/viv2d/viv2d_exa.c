@@ -63,8 +63,8 @@
 #define VIV2D_REPEAT_WITH_MASK 1 // support repeat with mask
 //#define VIV2D_1X1_REPEAT_AS_SOLID 1 // use solid clear instead of stretch for 1x1 repeat
 //#define VIV2D_PER_OP_ATTACH 1
-//#define VIV2D_SUPPORT_A8_SRC 1
-//#define VIV2D_SUPPORT_A8_MASK 1
+#define VIV2D_SUPPORT_A8_SRC 1
+#define VIV2D_SUPPORT_A8_MASK 1
 
 #define VIV2D_PITCH_ALIGN 16
 
@@ -511,9 +511,8 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 			}
 		}
 	} else {
-		if (pix->bo) {
-			Viv2DDetachBo(pARMSOC, armsocPix);
-		}
+//		VIV2D_DBG_MSG("Viv2DModifyPixmapHeader failed pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
+		Viv2DDetachBo(pARMSOC, armsocPix);
 		return FALSE;
 	}
 	return TRUE;
@@ -731,7 +730,7 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 	}
 
 	if (dst->format.fmt == DE_FORMAT_A8) {
-		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareSolid dst:%p unsupported dst A8", pPixmap);
+		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareSolid dst:%p unsupported dst A8 %x", pPixmap, fg);
 		return FALSE;
 	}
 
@@ -779,7 +778,7 @@ static void Viv2DSolid (PixmapPtr pPixmap, int x1, int y1, int x2, int y2) {
 	{
 		_Viv2DOpAddRect(op, x1, y1, x2 - x1, y2 - y1);
 	} else {
-		_Viv2DStreamReserve(v2d->stream, 14 + 12 + 8 + op->cur_rect * 2 + 2);
+		_Viv2DStreamReserve(v2d->stream, 14 + 8 + op->cur_rect * 2 + 2);
 		_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
 		_Viv2DStreamColor(v2d, op->fg);
 		_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
@@ -811,7 +810,7 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	Viv2DOp *op = v2d->op;
 
 	if (op->cur_rect > 0) {
-		_Viv2DStreamReserve(v2d->stream, 14 + 12 + 8 + op->cur_rect * 2 + 2);
+		_Viv2DStreamReserve(v2d->stream, 14 + 8 + op->cur_rect * 2 + 2);
 		_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
 		_Viv2DStreamColor(v2d, op->fg);
 		_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
@@ -1170,7 +1169,7 @@ Viv2DCheckComposite (int op,
 	// src A8 seems to have a problem
 	if (src_fmt.fmt == DE_FORMAT_A8 && PICT_FORMAT_A(pDstPicture->format) != 0)
 	{
-		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported src A8 with dest %s",pix_format_name(pDstPicture->format));
+		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported src A8 with dest %s", pix_format_name(pDstPicture->format));
 		return FALSE;
 	}
 #endif
@@ -1205,7 +1204,7 @@ Viv2DCheckComposite (int op,
 #ifndef VIV2D_SUPPORT_A8_MASK
 		if (msk_fmt.fmt == DE_FORMAT_A8 && PICT_FORMAT_A(pDstPicture->format) != 0)
 		{
-			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported mask A8 with dest %s",pix_format_name(pDstPicture->format));
+			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported mask A8 with dest %s", pix_format_name(pDstPicture->format));
 			return FALSE;
 		}
 #endif
@@ -1390,14 +1389,18 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 	op = _Viv2DOpCreate();
 
+	if (pSrcPicture == NULL) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite happen");
+	}
+
 	if (pSrcPicture != NULL) {
 		VIV2D_DBG_MSG("Viv2DPrepareComposite srcPicture:%s/%s",
 		              Viv2DFormatColorStr(&src_fmt), Viv2DFormatSwizzleStr(&src_fmt));
 	}
 
 	if (src != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d)",
-		              pSrc, src, src->width, src->height);
+		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d) depth:%d bpp:%d",
+		              pSrc, src, src->width, src->height, pSrc->drawable.depth, pSrc->drawable.bitsPerPixel);
 	}
 
 	if (pMaskPicture != NULL) {
@@ -1499,9 +1502,9 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		}
 	}
 
-	if(pSrcPicture->clientClip) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite dst clip %p %d",pSrcPicture->clientClip, RegionNumRects(pSrcPicture->clientClip));
-	}
+//	if (pSrcPicture->clientClip) {
+//		VIV2D_DBG_MSG("Viv2DPrepareComposite dst clip %p %d", pSrcPicture->clientClip, RegionNumRects(pSrcPicture->clientClip));
+//	}
 
 	if (src != NULL)
 		src->format = src_fmt;
@@ -1554,7 +1557,9 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pDst);
 	Viv2DOp *op = v2d->op;
 
+
 	if (op->has_mask) {
+
 		// tmp 32bits argb pix
 		Viv2DPixmapPrivRec tmp;
 		Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
@@ -1592,12 +1597,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		drect[0].y1 = dstY;
 		drect[0].x2 = dstX + width;
 		drect[0].y2 = dstY + height;
-
-		/*		_Viv2DStreamReserve(v2d->stream, 14 + 8 + 2 + 2);
-				_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
-				_Viv2DStreamColor(v2d, 0xff00ff00);
-				_Viv2DStreamRects(v2d, mrect, 1);
-		*/
 
 		_Viv2DStreamReserveComp(v2d->stream, op->src_type, 1, TRUE);
 
@@ -1652,49 +1651,122 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 //		VIV2D_DBG_MSG("Viv2DComposite mask %x %d %d -> %d", op->fg, op->blend_op->op, op->blend_op->srcBlendMode, op->blend_op->dstBlendMode);
 		_Viv2DStreamRects(v2d, drect, 1);
 
-		_Viv2DStreamCommit(v2d); // commit now because of tmp bo
-		etna_bo_cpu_prep(tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+//		_Viv2DStreamCommit(v2d); // commit now because of tmp bo
+//		etna_bo_cpu_prep(tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+
+			// FIXME I think we need to maintains a tmp pix list which will be deleted later
 		etna_bo_del(tmp.bo);
 //		VIV2D_DBG_MSG("Viv2DComposite del bo %p", tmp.bo);
 	} else {
-		// new srcX,srcY group
-		if (op->prev_src_x != srcX || op->prev_src_y != srcY || op->cur_rect >= VIV2D_MAX_RECTS)
-		{
-			// stream previous rects
-			if (op->prev_src_x > -1) {
-				_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
-				// create states for srcX,srcY group
-				switch (op->src_type) {
-				case viv2d_src_1x1_repeat:
-					_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
-					_Viv2DStreamStretch(v2d, op->src, op->dst);
-					_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
-					break;
-				case viv2d_src_solid:
-					_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
-					_Viv2DStreamColor(v2d, op->fg);
-					break;
-				default:
-					_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
-					_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
-					break;
-				}
-				_Viv2DStreamBlendOp(v2d, op->blend_op, op->src_alpha, op->dst_alpha, op->src_alpha_mode_global, op->dst_alpha_mode_global);
 
-				_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
-				op->cur_rect = 0;
+		if (op->src_fmt.fmt == DE_FORMAT_A8 && op->dst->format.fmt == DE_FORMAT_A8R8G8B8)
+		{
+			Viv2DRect mrect[1], drect[1];
+
+			mrect[0].x1 = 0;
+			mrect[0].y1 = 0;
+			mrect[0].x2 = width;
+			mrect[0].y2 = height;
+
+			drect[0].x1 = dstX;
+			drect[0].y1 = dstY;
+			drect[0].x2 = dstX + width;
+			drect[0].y2 = dstY + height;
+
+			Viv2DPixmapPrivRec tmp;
+
+			if(op->src_type==viv2d_src_pix) {			
+			Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
+			int pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+			tmp.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+
+			tmp.width = width;
+			tmp.height = height;
+			tmp.pitch = pitch;
+			Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
+
+
+			// FIXME: do not know why, but we need to convert A8 to intermediary A8R8G8B8 surface ...
+			_Viv2DStreamReserveComp(v2d->stream, op->src_type, 1, TRUE);
+			_Viv2DStreamSrcWithFormat(v2d, op->src, srcX, srcY, width, height, &op->src_fmt);
+			_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, &mrect);
+			_Viv2DStreamBlendOp(v2d, cpy_op, 0, 0, FALSE, FALSE);
+			_Viv2DStreamRects(v2d, mrect, 1);
+			}
+
+
+			_Viv2DStreamReserveComp(v2d->stream, op->src_type, 1, TRUE);
+			// create states for srcX,srcY group
+			switch (op->src_type) {
+			case viv2d_src_1x1_repeat:
+				_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
+				_Viv2DStreamStretch(v2d, op->src, op->dst);
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
+				break;
+			case viv2d_src_solid:
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
+				_Viv2DStreamColor(v2d, op->fg);
+				break;
+			default:
+//				_Viv2DStreamSrcWithFormat(v2d, op->src, srcX, srcY, width, height, &op->src_fmt);
+//				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, &drect);
+				_Viv2DStreamSrcWithFormat(v2d, &tmp, 0, 0, width, height, &tmp.format);
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, &drect);
+				break;
+			}
+			_Viv2DStreamBlendOp(v2d, op->blend_op, 0, 0, FALSE, FALSE);
+			_Viv2DStreamRects(v2d, drect, 1);
+
+//			_Viv2DStreamCommit(v2d); // commit now because of tmp bo
+//			etna_bo_cpu_prep(tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+
+			// FIXME I think we need to maintains a tmp pix list which will be deleted later
+			if(op->src_type==viv2d_src_pix)
+			etna_bo_del(tmp.bo);
+
+
+			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 composite");
+
+		} else {
+			// new srcX,srcY group
+			if (op->prev_src_x != srcX || op->prev_src_y != srcY || op->cur_rect >= VIV2D_MAX_RECTS)
+			{
+				// stream previous rects
+				if (op->prev_src_x > -1) {
+					_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
+					// create states for srcX,srcY group
+					switch (op->src_type) {
+					case viv2d_src_1x1_repeat:
+						_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
+						_Viv2DStreamStretch(v2d, op->src, op->dst);
+						_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
+						break;
+					case viv2d_src_solid:
+						_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
+						_Viv2DStreamColor(v2d, op->fg);
+						break;
+					default:
+						_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
+						_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
+						break;
+					}
+					_Viv2DStreamBlendOp(v2d, op->blend_op, op->src_alpha, op->dst_alpha, op->src_alpha_mode_global, op->dst_alpha_mode_global);
+
+					_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
+					op->cur_rect = 0;
 //				_Viv2DStreamCommit(v2d);
+
+				}
 
 			}
 
+			_Viv2DOpAddRect(op, dstX, dstY, width, height);
+
+			op->prev_src_x = srcX;
+			op->prev_src_y = srcY;
+			op->prev_width = width;
+			op->prev_height = height;
 		}
-
-		_Viv2DOpAddRect(op, dstX, dstY, width, height);
-
-		op->prev_src_x = srcX;
-		op->prev_src_y = srcY;
-		op->prev_width = width;
-		op->prev_height = height;
 	}
 
 	VIV2D_DBG_MSG("Viv2DComposite (src:%dx%d IN msk:%dx%d) OP dst:%dx%d(%dx%d) : %dx%d src_type:%d fg:%x msk_type:%d has_mask:%d mask:%x",
@@ -1729,31 +1801,34 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		// already done masked operations
 //		_Viv2DStreamCommit(v2d);
 	} else {
-		_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
-		// create states for srcX,srcY group
-		switch (op->src_type) {
-		case viv2d_src_1x1_repeat:
-			_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
-			_Viv2DStreamStretch(v2d, op->src, op->dst);
-			_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
-			break;
-		case viv2d_src_solid:
-			_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
-			_Viv2DStreamColor(v2d, op->fg);
-			break;
-		default:
-			_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
-			_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
-			break;
+		if (op->src_fmt.fmt == DE_FORMAT_A8 && op->dst->format.fmt == DE_FORMAT_A8R8G8B8)
+		{
+		} else {
+			_Viv2DStreamReserveComp(v2d->stream, op->src_type, op->cur_rect, TRUE);
+			// create states for srcX,srcY group
+			switch (op->src_type) {
+			case viv2d_src_1x1_repeat:
+				_Viv2DStreamSrcWithFormat(v2d, op->src, 0, 0, 1, 1, &op->src_fmt);
+				_Viv2DStreamStretch(v2d, op->src, op->dst);
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, NULL);
+				break;
+			case viv2d_src_solid:
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
+				_Viv2DStreamColor(v2d, op->fg);
+				break;
+			default:
+				_Viv2DStreamSrcWithFormat(v2d, op->src, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, &op->src_fmt);
+				_Viv2DStreamDst(v2d, op->dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
+				break;
+			}
+			_Viv2DStreamBlendOp(v2d, op->blend_op, op->src_alpha, op->dst_alpha, op->src_alpha_mode_global, op->dst_alpha_mode_global);
+
+			_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
+
+			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
+			_Viv2DStreamCommit(v2d); // why this is needed ?
 		}
-		_Viv2DStreamBlendOp(v2d, op->blend_op, op->src_alpha, op->dst_alpha, op->src_alpha_mode_global, op->dst_alpha_mode_global);
-
-		_Viv2DStreamRects(v2d, op->rects, op->cur_rect);
-
-		VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
-		_Viv2DStreamCommit(v2d); // why this is needed ?
 	}
-
 #ifdef VIV2D_PER_OP_ATTACH
 	if (op->src)
 		Viv2DDetachBo(pARMSOC, op->src->armsocPix);
