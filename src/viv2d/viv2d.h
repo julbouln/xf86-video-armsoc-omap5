@@ -129,7 +129,7 @@ typedef struct _Viv2DRec {
 	struct etna_pipe *pipe;
 	struct etna_cmd_stream *stream;
 
-	Viv2DOp *op;
+	Viv2DOp op;
 
 	struct etna_bo *bo;
 	int width;

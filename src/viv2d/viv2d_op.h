@@ -49,19 +49,18 @@ static inline void _Viv2DOpAddRect(Viv2DOp *op, int x, int y, int width, int hei
 	op->cur_rect++;
 }
 
-static inline Viv2DOp *_Viv2DOpCreate(void) {
-	Viv2DOp *op = (Viv2DOp *)calloc(sizeof(*op), 1);
-
+static inline void _Viv2DOpInit(Viv2DOp *op) {
+	op->has_mask = FALSE;
 	op->blend_op = NULL;
 	op->prev_src_x = -1;
 	op->prev_src_y = -1;
 	op->cur_rect = 0;
+	op->dst = NULL;
+	op->src = NULL;
+	op->msk = NULL;
+	op->fg = 0;
+	op->mask = 0;
 
-	return op;
-}
-
-static inline void _Viv2DOpDestroy(Viv2DOp *op) {
-	free(op);
 }
 
 static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
@@ -291,23 +290,23 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
                                     Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
                                     int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
 	Bool blend = blend_op != NULL ? TRUE : FALSE;
-	Bool src_global=FALSE;
-	Bool dst_global=FALSE;
-	Bool src_alpha=0;
-	Bool dst_alpha=0;
-/*
-	if(dst->format.fmt == DE_FORMAT_X8R8G8B8) {
-		dst_global=TRUE;
-		dst_alpha=0xff;
-		dst->format.fmt = DE_FORMAT_A8R8G8B8;
-	}
+	Bool src_global = FALSE;
+	Bool dst_global = FALSE;
+	Bool src_alpha = 0;
+	Bool dst_alpha = 0;
+	/*
+		if(dst->format.fmt == DE_FORMAT_X8R8G8B8) {
+			dst_global=TRUE;
+			dst_alpha=0xff;
+			dst->format.fmt = DE_FORMAT_A8R8G8B8;
+		}
 
-	if(src_fmt->fmt == DE_FORMAT_X8R8G8B8) {
-		src_global=TRUE;
-		src_alpha=0xff;
-		src_fmt->fmt = DE_FORMAT_A8R8G8B8;
-	}
-	*/
+		if(src_fmt->fmt == DE_FORMAT_X8R8G8B8) {
+			src_global=TRUE;
+			src_alpha=0xff;
+			src_fmt->fmt = DE_FORMAT_A8R8G8B8;
+		}
+		*/
 	_Viv2DStreamReserveComp(v2d, src_type, cur_rect, blend);
 
 	switch (src_type) {
