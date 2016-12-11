@@ -44,4 +44,6 @@ static inline Viv2DPixmapPrivPtr Viv2DPixmapPrivFromPixmap(PixmapPtr pPixmap){
 	return pixPriv->priv;
 }
 
+struct ARMSOCEXARec *InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd);
+
 #endif
