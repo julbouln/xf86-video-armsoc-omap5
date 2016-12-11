@@ -177,7 +177,7 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		} else {
 			if (pix->bo) {
 				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
-				Viv2DFinishPix(v2d, pix);
+//				Viv2DFinishPix(v2d, pix);
 				etna_bo_del(pix->bo);
 				pix->bo = NULL;
 			}
@@ -864,7 +864,8 @@ static void Viv2DCopy (PixmapPtr pDstPixmap,
 		if (op->prev_src_x > -1) {
 			// create states for srcX,srcY group
 			// NOTE blend needed because of cursor artifact
-			_Viv2DStreamCopy(v2d, op->src, op->dst, op->blend_op, op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, op->rects, op->cur_rect);
+			_Viv2DStreamCopy(v2d, op->src, op->dst, op->blend_op, 
+				op->prev_src_x, op->prev_src_y, op->prev_width, op->prev_height, op->rects, op->cur_rect);
 
 			op->cur_rect = 0;
 		}
@@ -877,7 +878,8 @@ static void Viv2DCopy (PixmapPtr pDstPixmap,
 	op->prev_src_y = srcY;
 	op->prev_width = width;
 	op->prev_height = height;
-	VIV2D_DBG_MSG("Viv2DCopy src:%p(%dx%d) -> dst:%p/%p(%dx%d) : %dx%d", op->src, srcX, srcY, pDstPixmap, op->dst, dstX, dstY, width, height);
+
+	VIV2D_DBG_MSG("Viv2DCopy src:%p(%dx%d) -> dst:%p/%p(%dx%d) : %dx%d %d", op->src, srcX, srcY, pDstPixmap, op->dst, dstX, dstY, width, height, op->cur_rect);
 }
 
 /**
@@ -1347,7 +1349,7 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		}
 
 		if (pMask == NULL && pMaskPicture->pSourcePict->type == SourcePictTypeSolidFill) {
-			VIV2D_DBG_MSG("Viv2DPrepareComposite msk picture color %x - %x", Viv2DColour(pMaskPicture->pSourcePict->solidFill.color, msk_fmt.depth));
+			VIV2D_DBG_MSG("Viv2DPrepareComposite msk picture color %x", Viv2DColour(pMaskPicture->pSourcePict->solidFill.color, msk_fmt.depth));
 			op->msk_type = viv2d_src_solid;
 			op->mask = Viv2DColour(pMaskPicture->pSourcePict->solidFill.color, msk_fmt.depth);
 		}

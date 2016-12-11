@@ -280,7 +280,7 @@ static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int c
 
 static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
                                     int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_SOLID_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect));
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect));
 	_Viv2DStreamSrc(v2d, src, x, y, w, h);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 	_Viv2DStreamBlendOp(v2d, blend_op, 0, 0, FALSE, FALSE);
