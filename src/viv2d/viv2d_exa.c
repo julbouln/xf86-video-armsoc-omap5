@@ -66,6 +66,8 @@
 #define VIV2D_SUPPORT_A8_SRC 1
 #define VIV2D_SUPPORT_A8_MASK 1
 
+#define VIV2D_PER_OP_ATTACH 1
+
 #define VIV2D_PITCH_ALIGN 16
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
@@ -163,7 +165,8 @@ static inline void Viv2DFinishPix(Viv2DRec *v2d, Viv2DPixmapPrivPtr pix) {
 //			etna_cmd_stream_flush(v2d->stream);
 		}
 		pix->refcnt = -1;
-		etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+		if(pix->bo)
+			etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
 	}
 
 }
@@ -176,8 +179,11 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
 			if (pix->bo) {
+#ifdef VIV2D_PER_OP_ATTACH
+				etna_bo_cpu_prep(pix->bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
+				Viv2DFinishPix(v2d, pix);
+#endif
 				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
-//				Viv2DFinishPix(v2d, pix);
 				etna_bo_del(pix->bo);
 				pix->bo = NULL;
 			}
@@ -197,6 +203,9 @@ static inline void Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 			if (fd) {
 				pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 				close(fd);
+#ifdef VIV2D_PER_OP_ATTACH
+				etna_bo_cpu_fini(pix->bo);
+#endif
 				VIV2D_DBG_MSG("Viv2DAttachBo attach %p bo:%p", pix, pix->bo);
 			} else {
 				VIV2D_ERR_MSG("Viv2D error: cannot attach bo : %d", fd);
@@ -358,7 +367,8 @@ Viv2DFinishAccess(PixmapPtr pPixmap, int index)
 
 	VIV2D_DBG_MSG("Viv2DFinishAccess %p (%dx%d) %d (%d)", pPixmap, pix->width, pix->height, index, pix->refcnt);
 	if (pix->refcnt == -1) {
-		etna_bo_cpu_fini(pix->bo);
+		if(pix->bo)
+			etna_bo_cpu_fini(pix->bo);
 		pix->refcnt = 0;
 	}
 }
@@ -428,8 +438,10 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 					pix->width = armsoc_bo_width(armsocPix->bo);
 					pix->height = armsoc_bo_height(armsocPix->bo);
 					pix->pitch = armsoc_bo_pitch(armsocPix->bo);
+#ifndef VIV2D_PER_OP_ATTACH
 					Viv2DDetachBo(pARMSOC, armsocPix);
 					Viv2DAttachBo(pARMSOC, armsocPix);
+#endif
 				}
 			}
 		}
@@ -534,12 +546,20 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	rects[0].x2 = x + w;
 	rects[0].y2 = y + h;
 
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DAttachBo(pARMSOC, armsocPix);
+#endif
+
 	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1));
 	_Viv2DStreamSrc(v2d, &pix, 0, 0, pix.width, pix.height); // tmp source
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 //	_Viv2DStreamCommit(v2d);
+
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DDetachBo(pARMSOC, armsocPix);
+#endif
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p(%d) %dx%d(%dx%d) %dx%d %d/%d", pDst, src, src_pitch, x, y, w, h,
 	              pDst->drawable.width, pDst->drawable.height,
@@ -619,6 +639,7 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
                                int alu, Pixel planemask, Pixel fg) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pPixmap);
@@ -656,6 +677,10 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 	v2d->op.fg = Viv2DColour(fg, pPixmap->drawable.depth);
 	v2d->op.mask = (uint32_t)planemask;
 	v2d->op.dst = dst;
+
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DAttachBo(pARMSOC, armsocPix);
+#endif
 
 	VIV2D_DBG_MSG("Viv2DPrepareSolid dst:%p/%p %dx%d, fg:%x mask:%x depth:%d alu:%d", pPixmap,
 	              dst, pPixmap->drawable.width, pPixmap->drawable.height, v2d->op.fg ,
@@ -712,6 +737,7 @@ static void Viv2DSolid (PixmapPtr pPixmap, int x1, int y1, int x2, int y2) {
 static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 
@@ -719,6 +745,9 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 		_Viv2DStreamSolid(v2d, v2d->op.dst, v2d->op.fg, v2d->op.rects, v2d->op.cur_rect);
 	}
 
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DDetachBo(pARMSOC, armsocPix);
+#endif
 	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
 
 //	_Viv2DStreamCommit(v2d);
@@ -771,6 +800,8 @@ PrepareSolidFail(PixmapPtr pPixmap, int alu, Pixel planemask, Pixel fill_colour)
 static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
                               PixmapPtr pDstPixmap,
                               int dx, int dy, int alu, Pixel planemask) {
+	struct ARMSOCPixmapPrivRec *armsocSrcPix = exaGetPixmapDriverPrivate(pSrcPixmap);
+	struct ARMSOCPixmapPrivRec *armsocDstPix = exaGetPixmapDriverPrivate(pDstPixmap);
 	ScrnInfoPtr pScrn = pix2scrn(pDstPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
@@ -812,6 +843,11 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 	v2d->op.dst = dst;
 	v2d->op.blend_op = &viv2d_blend_op[PictOpSrc];
 
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DAttachBo(pARMSOC, armsocSrcPix);
+	Viv2DAttachBo(pARMSOC, armsocDstPix);
+#endif
+
 	VIV2D_DBG_MSG("Viv2DPrepareCopy  src:%p/%p(%dx%d)[%s/%s] dst:%p/%p(%dx%d)[%s/%s] dir:%dx%d alu:%d planemask:%x",
 	              pSrcPixmap, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
 	              pDstPixmap, dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
@@ -847,6 +883,8 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 static void Viv2DCopy (PixmapPtr pDstPixmap,
                        int srcX,
                        int srcY, int dstX, int dstY, int width, int height) {
+	ScrnInfoPtr pScrn = pix2scrn(pDstPixmap);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pDstPixmap);
 
 	// new srcX,srcY group
@@ -855,8 +893,8 @@ static void Viv2DCopy (PixmapPtr pDstPixmap,
 		if (v2d->op.prev_src_x > -1) {
 			// create states for srcX,srcY group
 			// NOTE blend needed because of cursor artifact
-			_Viv2DStreamCopy(v2d, v2d->op.src, v2d->op.dst, v2d->op.blend_op, 
-				v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
+			_Viv2DStreamCopy(v2d, v2d->op.src, v2d->op.dst, v2d->op.blend_op,
+			                 v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
 
 			v2d->op.cur_rect = 0;
 		}
@@ -897,6 +935,10 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 
 	_Viv2DStreamCommit(v2d); // ?
 
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DDetachBo(pARMSOC, v2d->op.src->armsocPix);
+	Viv2DDetachBo(pARMSOC, v2d->op.dst->armsocPix);
+#endif
 }
 /** @} */
 #else
@@ -1187,6 +1229,9 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
                       PicturePtr pMaskPicture,
                       PicturePtr pDstPicture,
                       PixmapPtr pSrc, PixmapPtr pMask, PixmapPtr pDst) {
+	struct ARMSOCPixmapPrivRec *armsocSrcPix = NULL;
+	struct ARMSOCPixmapPrivRec *armsocMaskPix = NULL;
+	struct ARMSOCPixmapPrivRec *armsocDstPix = exaGetPixmapDriverPrivate(pDst);
 	ScrnInfoPtr pScrn = pix2scrn(pDst);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
@@ -1199,6 +1244,7 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	Viv2DFormat msk_fmt;
 
 	if (pSrc != NULL) {
+		armsocSrcPix = exaGetPixmapDriverPrivate(pSrc);
 		src = Viv2DPixmapPrivFromPixmap(pSrc);
 	}
 
@@ -1210,6 +1256,7 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	}
 
 	if (pMask != NULL) {
+		armsocMaskPix = exaGetPixmapDriverPrivate(pMask);
 		msk = Viv2DPixmapPrivFromPixmap(pMask);
 	}
 
@@ -1351,6 +1398,13 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	v2d->op.src = src;
 	v2d->op.dst = dst;
 	v2d->op.msk = msk;
+
+
+#ifdef VIV2D_PER_OP_ATTACH
+	Viv2DAttachBo(pARMSOC, armsocSrcPix);
+	Viv2DAttachBo(pARMSOC, armsocMaskPix);
+	Viv2DAttachBo(pARMSOC, armsocDstPix);
+#endif
 
 	return TRUE;
 }
@@ -1536,6 +1590,15 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		}
 	}
 
+#ifdef VIV2D_PER_OP_ATTACH
+	if (v2d->op.src)
+		Viv2DDetachBo(pARMSOC, v2d->op.src->armsocPix);
+	if (v2d->op.msk)
+		Viv2DDetachBo(pARMSOC, v2d->op.msk->armsocPix);
+
+	Viv2DDetachBo(pARMSOC, v2d->op.dst->armsocPix);
+#endif
+
 }
 
 #else
@@ -1656,9 +1719,13 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	exa->DestroyPixmap = Viv2DDestroyPixmap;
 	exa->ModifyPixmapHeader = Viv2DModifyPixmapHeader;
 
-
+#ifdef VIV2D_PER_OP_ATTACH
+	exa->PrepareAccess = ARMSOCPrepareAccess;
+	exa->FinishAccess = ARMSOCFinishAccess;
+#else
 	exa->PrepareAccess = Viv2DPrepareAccess;
 	exa->FinishAccess = Viv2DFinishAccess;
+#endif
 
 	exa->PixmapIsOffscreen = ARMSOCPixmapIsOffscreen;
 
