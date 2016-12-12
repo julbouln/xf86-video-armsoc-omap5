@@ -42,14 +42,14 @@ static Bool ARMSOCDRI3Authorise(struct ARMSOCRec *pARMSOC, int fd)
 		return TRUE;
 
 	ret = drmGetMagic(fd, &magic);
-	if (ret){
-		EARLY_ERROR_MSG("ARMSOCDRI3Open cannot get magic : %d",ret);
+	if (ret) {
+		EARLY_ERROR_MSG("ARMSOCDRI3Open cannot get magic : %d", ret);
 		return FALSE;
 	}
 
 	ret = drmAuthMagic(pARMSOC->drmFD, magic);
-	if(ret) {
-		EARLY_ERROR_MSG("ARMSOCDRI3Open cannot auth magic : %d",ret);
+	if (ret) {
+		EARLY_ERROR_MSG("ARMSOCDRI3Open cannot auth magic : %d", ret);
 		return FALSE;
 	}
 
@@ -89,12 +89,12 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 	PixmapPtr pixmap;
 	struct ARMSOCPixmapPrivRec *priv;
 
-	INFO_MSG("ARMSOCDRI3PixmapFromFD %dx%d %d/%d",width,height,depth,bpp);
 	pixmap = pScreen->CreatePixmap(pScreen, width, height, depth, 0);
 	if (pixmap == NullPixmap) {
 		ERROR_MSG("ARMSOCDRI3Open cannot create pixmap");
 		return pixmap;
 	}
+	INFO_MSG("ARMSOCDRI3PixmapFromFD %p %dx%d %d/%d %d", pixmap, width, height, depth, bpp, stride);
 
 	pScreen->ModifyPixmapHeader(pixmap, width, height, depth, bpp, stride, NULL);
 
@@ -107,7 +107,8 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 	}
 
 	armsoc_bo_put_dmabuf(priv->bo, fd);
-
+	// FIXME: dirty
+	Viv2DReattach(pixmap, width, height, stride);
 	return pixmap;
 }
 
