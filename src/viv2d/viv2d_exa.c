@@ -1428,7 +1428,10 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
 
 		// for some reasons, there is problem with A8 mask too
-		if (v2d->op.msk_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8) {
+//		if (1)
+//		if (v2d->op.msk_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8)
+		if (v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8 || (v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
+		{
 			tmp_dest.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
 			tmp_dest.width = width;
 			tmp_dest.height = height;
@@ -1441,7 +1444,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			_Viv2DStreamComp(v2d, v2d->op.msk_type, v2d->op.msk, &v2d->op.msk_fmt, v2d->op.mask, &tmp, msk_op, maskX, maskY, width, height, mrect, 1);
 			_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp, &tmp.format, 0, &tmp_dest, v2d->op.blend_op, 0, 0, width, height, mrect, 1);
 
-			_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp_dest, &tmp.format, 0, v2d->op.dst, cpy_op, 0, 0, width, height, drect, 1);
+			_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp_dest, &tmp_dest.format, 0, v2d->op.dst, cpy_op, 0, 0, width, height, drect, 1);
 
 			etna_bo_del(tmp_dest.bo);
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 mask composite");
@@ -1460,9 +1463,12 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 //		VIV2D_DBG_MSG("Viv2DComposite del bo %p", tmp.bo);
 	} else {
 
-		if (v2d->op.src_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8)
+//		if (1)
+//		if (v2d->op.src_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8)
+		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
 			Viv2DPixmapPrivRec tmp;
+			Viv2DPixmapPrivRec tmp_dest;
 
 			if (v2d->op.src_type == viv2d_src_pix) {
 				Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
@@ -1475,11 +1481,31 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 				Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
 
 				// FIXME: do not know why, but we need to convert A8 to intermediary A8R8G8B8 surface ...
+				/*				_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, &tmp,
+								                 cpy_op, srcX, srcY, width, height, mrect, 1);
+								_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp, &tmp.format, 0, v2d->op.dst,
+								                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
+				*/
+
+				tmp_dest.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+				tmp_dest.width = width;
+				tmp_dest.height = height;
+				tmp_dest.pitch = pitch;
+				Viv2DSetFormat(32, 32, &tmp_dest.format); // A8R8G8B8
+
+
+				_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.dst, &v2d->op.dst->format, 0, &tmp_dest,
+				                 cpy_op, dstX, dstY, width, height, mrect, 1);
+
 				_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, &tmp,
 				                 cpy_op, srcX, srcY, width, height, mrect, 1);
-				_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp, &tmp.format, 0, v2d->op.dst,
-				                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
+				_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp, &tmp.format, 0, &tmp_dest,
+				                 v2d->op.blend_op, 0, 0, width, height, mrect, 1);
 
+				_Viv2DStreamComp(v2d, viv2d_src_pix, &tmp_dest, &tmp_dest.format, 0, v2d->op.dst,
+				                 cpy_op, 0, 0, width, height, drect, 1);
+
+				etna_bo_del(tmp_dest.bo);
 				// FIXME I think we need to maintains a tmp pix list which will be deleted later
 //			_Viv2DStreamCommit(v2d); // commit now because of tmp bo
 //			etna_bo_cpu_prep(tmp.bo, DRM_ETNA_PREP_READ | DRM_ETNA_PREP_WRITE);
@@ -1543,7 +1569,9 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		// already done masked operations
 //		_Viv2DStreamCommit(v2d);
 	} else {
-		if (v2d->op.src_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8)
+//		if (1)
+//		if (v2d->op.src_fmt.fmt == DE_FORMAT_A8 && v2d->op.dst->format.fmt == DE_FORMAT_A8R8G8B8)
+		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
 		} else {
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
