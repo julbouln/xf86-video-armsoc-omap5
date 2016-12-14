@@ -56,7 +56,7 @@
 #define VIV2D_SOLID 1
 #define VIV2D_COPY 1
 #define VIV2D_COMPOSITE 1
-#define VIV2D_UPLOAD_TO_SCREEN 1 // NOTE can't see any improvement with that
+//#define VIV2D_UPLOAD_TO_SCREEN 1 // NOTE can't see any improvement with that
 
 #define VIV2D_MASK_SUPPORT 1 // support mask
 #define VIV2D_SOLID_PICTURE 1 // support solid clear picture
@@ -915,9 +915,9 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
 
 	// commit only if dest pixmap is screen
-	if (armsocPix->bo == pARMSOC->scanout) { 
+//	if (armsocPix->bo == pARMSOC->scanout) { 
 		_Viv2DStreamCommit(v2d);
-	}
+//	}
 
 }
 /** @} */

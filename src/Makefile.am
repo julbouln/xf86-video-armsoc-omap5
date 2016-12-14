@@ -55,5 +55,6 @@ armsoc_drv_la_SOURCES = \
          armsoc_driver.c \
          armsoc_dumb.c \
          armsoc_dri3.c \
+         armsoc_present.c \
          viv2d/viv2d_exa.c \
          $(DRMMODE_SRCS)

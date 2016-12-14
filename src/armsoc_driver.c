@@ -976,6 +976,7 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 	if (pARMSOC->pARMSOCEXA) {
 //		pARMSOC->dri = ARMSOCDRI2ScreenInit(pScreen);
 		pARMSOC->dri = ARMSOCDRI3ScreenInit(pScreen);
+		armsoc_present_screen_init(pScreen);
 	}
 	else
 		pARMSOC->dri = FALSE;

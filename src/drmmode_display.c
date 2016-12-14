@@ -54,60 +54,7 @@
 
 #include <libudev.h>
 #include "drmmode_driver.h"
-
-struct drmmode_cursor_rec {
-	/* hardware cursor: */
-	struct armsoc_bo *bo;
-	int x, y;
-	 /* These are used for HWCURSOR_API_PLANE */
-	drmModePlane *ovr;
-	uint32_t fb_id;
-	/* This is used for HWCURSOR_API_STANDARD */
-	uint32_t handle;
-};
-
-struct drmmode_rec {
-	int fd;
-	drmModeResPtr mode_res;
-	int cpp;
-	struct udev_monitor *uevent_monitor;
-	InputHandlerProc uevent_handler;
-	struct drmmode_cursor_rec *cursor;
-};
-
-struct drmmode_crtc_private_rec {
-	struct drmmode_rec *drmmode;
-	uint32_t crtc_id;
-	int cursor_visible;
-	/* settings retained on last good modeset */
-	int last_good_x;
-	int last_good_y;
-	Rotation last_good_rotation;
-	DisplayModePtr last_good_mode;
-};
-
-struct drmmode_prop_rec {
-	drmModePropertyPtr mode_prop;
-	/* Index within the kernel-side property arrays for this connector. */
-	int index;
-	/* if range prop, num_atoms == 1;
-	 * if enum prop, num_atoms == num_enums + 1
-	 */
-	int num_atoms;
-	Atom *atoms;
-};
-
-struct drmmode_output_priv {
-	struct drmmode_rec *drmmode;
-	int output_id;
-	drmModeConnectorPtr connector;
-	drmModeEncoderPtr *encoders;
-	drmModePropertyBlobPtr edid_blob;
-	int num_props;
-	struct drmmode_prop_rec *props;
-	int enc_mask;   /* encoders present (mask of encoder indices) */
-	int enc_clones; /* encoder clones possible (mask of encoder indices) */
-};
+#include "drmmode_display.h"
 
 static void drmmode_output_dpms(xf86OutputPtr output, int mode);
 static Bool resize_scanout_bo(ScrnInfoPtr pScrn, int width, int height);
@@ -191,6 +138,7 @@ drmmode_crtc_dpms(xf86CrtcPtr crtc, int mode)
 	ScrnInfoPtr pScrn = crtc->scrn;
 
 	DEBUG_MSG("Setting dpms mode %d on crtc %d", mode, drmmode_crtc->crtc_id);
+	drmmode_crtc->dpms_mode = mode;
 
 	switch (mode) {
 	case DPMSModeOn:
@@ -298,6 +246,8 @@ drmmode_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 		if (0 == fb_id)
 			return FALSE;
 	}
+
+	drmmode->fb_id=fb_id;
 
 	/* Set the new mode: */
 	crtc->mode = *mode;
@@ -873,6 +823,17 @@ static const xf86CrtcFuncsRec drmmode_crtc_funcs = {
 };
 
 
+static uint32_t
+drmmode_crtc_vblank_pipe(int crtc_id)
+{
+    if (crtc_id > 1)
+        return crtc_id << DRM_VBLANK_HIGH_CRTC_SHIFT;
+    else if (crtc_id > 0)
+        return DRM_VBLANK_SECONDARY;
+    else
+        return 0;
+}
+
 static void
 drmmode_crtc_init(ScrnInfoPtr pScrn, struct drmmode_rec *drmmode, int num)
 {
@@ -889,6 +850,7 @@ drmmode_crtc_init(ScrnInfoPtr pScrn, struct drmmode_rec *drmmode, int num)
 	drmmode_crtc->crtc_id = drmmode->mode_res->crtcs[num];
 	drmmode_crtc->drmmode = drmmode;
 	drmmode_crtc->last_good_mode = NULL;
+	drmmode_crtc->vblank_pipe = drmmode_crtc_vblank_pipe(num);
 
 	INFO_MSG("Got CRTC: %d (id: %d)",
 			num, drmmode_crtc->crtc_id);
@@ -1748,7 +1710,7 @@ vblank_handler(int fd, unsigned int sequence, unsigned int tv_sec,
 	ARMSOCDRI2VBlankHandler(sequence, tv_sec, tv_usec, user_data);
 }
 
-static drmEventContext event_context = {
+drmEventContext event_context = {
 		.version = DRM_EVENT_CONTEXT_VERSION,
 		.page_flip_handler = page_flip_handler,
 		.vblank_handler = vblank_handler,
