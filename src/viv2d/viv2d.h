@@ -259,6 +259,14 @@ static inline const char *Viv2DFormatColorStr(Viv2DFormat *fmt)
 		return "A8";
 	case DE_FORMAT_MONOCHROME:
 		return "A1";
+
+	case DE_FORMAT_UYVY:
+		return "UYVY";
+	case DE_FORMAT_YUY2:
+		return "YUY2";
+	case DE_FORMAT_YV12:
+		return "YV12";
+	
 	default:
 		return "UNKNOWN";
 	}

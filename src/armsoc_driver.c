@@ -974,9 +974,10 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 		pARMSOC->pARMSOCEXA = InitNullEXA(pScreen, pScrn,
 								pARMSOC->drmFD);
 	if (pARMSOC->pARMSOCEXA) {
-//		pARMSOC->dri = ARMSOCDRI2ScreenInit(pScreen);
-		pARMSOC->dri = ARMSOCDRI3ScreenInit(pScreen);
-		armsoc_present_screen_init(pScreen);
+//		pARMSOC->dri = ARMSOCDRI2ScreenInit(pScreen); // DRI2
+		pARMSOC->dri = ARMSOCDRI3ScreenInit(pScreen); // DRI3
+		armsoc_present_screen_init(pScreen); // Present
+		ARMSOCVideoScreenInit(pScreen); // XV
 	}
 	else
 		pARMSOC->dri = FALSE;

@@ -398,7 +398,7 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	ARMSOCDestroyPixmap(pScreen, armsocPix);
 }
 
-void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
+static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
@@ -1403,9 +1403,9 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 		// for some reasons, there is problem with non A8R8G8B8 surfaces
 //
-		if ((v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) || 
-			(v2d->op.msk && v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8) || 
-			v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
+		if ((v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
+		        (v2d->op.msk && v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
+		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
 			tmp_dest.bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
 			tmp_dest.width = width;
@@ -1442,8 +1442,8 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		etna_bo_del(tmp.bo);
 	} else {
 		// we need to use intermediary surfaces if dst or src is not A8R8G8B8
-		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || 
-			v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
+		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 ||
+		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
 			Viv2DPixmapPrivRec tmp;
 			Viv2DPixmapPrivRec tmp_dest;
@@ -1590,11 +1590,268 @@ FreeScreen(FREE_SCREEN_ARGS_DECL)
 {
 }
 
+// XV
+#include "drm_fourcc.h"
+static unsigned int Viv2DGetFormats(unsigned int *formats) {
+	formats[0] = fourcc_code('U', 'Y', 'V', 'Y');
+	formats[1] = fourcc_code('Y', 'U', 'Y', '2');
+	formats[2] = fourcc_code('Y', 'V', '1', '2');
+	formats[3] = fourcc_code('I', '4', '2', '0');
+	return 4;
+}
+
+
+#define KERNEL_ROWS	17
+#define KERNEL_INDICES	9
+#define KERNEL_SIZE	(KERNEL_ROWS * KERNEL_INDICES)
+#define KERNEL_STATE_SZ	((KERNEL_SIZE + 1) / 2)
+
+static uint32_t xv_filter_kernel[KERNEL_STATE_SZ];
+
+static inline float sinc(float x)
+{
+	return x != 0.0 ? sinf(x) / x : 1.0;
+}
+
+/*
+ * Some interesting observations of the kernel.  According to the etnaviv
+ * rnndb files:
+ *  - there are 128 states which hold the kernel.
+ *  - each entry contains 9 coefficients (one for each filter tap).
+ *  - the entries are indexed by 5 bits from the fractional coordinate
+ *    (which makes 32 entries.)
+ *
+ * As the kernel table is symmetrical around the centre of the fractional
+ * coordinate, only half of the entries need to be stored.  In other words,
+ * these pairs of indices should be the same:
+ *
+ *  00=31 01=30 02=29 03=28 04=27 05=26 06=25 07=24
+ *  08=23 09=22 10=21 11=20 12=19 13=18 14=17 15=16
+ *
+ * This means that there are only 16 entries.  However, etnaviv
+ * documentation says 17 are required.  What's the additional entry?
+ *
+ * The next issue is that the filter code always produces zero for the
+ * ninth filter tap.  If this is always zero, what's the point of having
+ * hardware deal with nine filter taps?  This makes no sense to me.
+ */
+static void etnaviv_init_filter_kernel(void)
+{
+	unsigned row, idx, i;
+	int16_t kernel_val[KERNEL_STATE_SZ * 2];
+	float row_ofs = 0.5;
+	float radius = 4.0;
+
+	/* Compute lanczos filter kernel */
+	for (row = i = 0; row < KERNEL_ROWS; row++) {
+		float kernel[KERNEL_INDICES] = { 0.0 };
+		float sum = 0.0;
+
+		for (idx = 0; idx < KERNEL_INDICES; idx++) {
+			float x = idx - 4.0 + row_ofs;
+
+			if (fabs(x) <= radius)
+				kernel[idx] = sinc(M_PI * x) *
+					      sinc(M_PI * x / radius);
+
+			sum += kernel[idx];
+		}
+
+		/* normalise the row */
+		if (sum)
+			for (idx = 0; idx < KERNEL_INDICES; idx++)
+				kernel[idx] /= sum;
+
+		/* convert to 1.14 format */
+		for (idx = 0; idx < KERNEL_INDICES; idx++) {
+			int val = kernel[idx] * (float)(1 << 14);
+
+			if (val < -0x8000)
+				val = -0x8000;
+			else if (val > 0x7fff)
+				val = 0x7fff;
+
+			kernel_val[i++] = val;
+		}
+
+		row_ofs -= 1.0 / ((KERNEL_ROWS - 1) * 2);
+	}
+
+	kernel_val[KERNEL_SIZE] = 0;
+
+	/* Now convert the kernel values into state values */
+	for (i = 0; i < KERNEL_STATE_SZ * 2; i += 2)
+		xv_filter_kernel[i / 2] =
+			VIVS_DE_FILTER_KERNEL_COEFFICIENT0(kernel_val[i]) |
+			VIVS_DE_FILTER_KERNEL_COEFFICIENT1(kernel_val[i + 1]);
+}
+
+static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t base, uint32_t num, const uint32_t *values)
+{
+	int i;
+    if(num == 0) return;
+    etna_cmd_stream_reserve(stream, 1 + num + 1); /* 1 extra for potential alignment */
+    etna_emit_load_state(stream, base >> 2, num);
+    for(i=0;i<num;i++) {
+    	etna_cmd_stream_emit(stream, values[i]);
+    }
+ }
+
+
+static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
+                                 PixmapPtr pOsdPix, BoxPtr pOsdBox,
+                                 PixmapPtr pDstPix, BoxPtr pDstBox,
+                                 unsigned int extraCount, PixmapPtr *extraPix, unsigned int format) {
+	Viv2DRec *v2d = Viv2DPrivFromPixmap(pDstPix);
+	Viv2DPixmapPrivPtr src = Viv2DPixmapPrivFromPixmap(pSrcPix);
+	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDstPix);
+	int s_w, s_h, d_w, d_h, v_scale, h_scale;
+	uint32_t x, y;
+	Viv2DPixmapPrivRec tmp;
+
+	tmp.width = dst->width;
+	tmp.height = dst->height;
+	tmp.pitch = dst->pitch;
+	Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
+	tmp.bo = etna_bo_new(v2d->dev, tmp.pitch * tmp.height, ETNA_BO_UNCACHED);
+
+	Viv2DSetFormat(pSrcPix->drawable.depth, pSrcPix->drawable.bitsPerPixel, &src->format);
+	Viv2DSetFormat(pDstPix->drawable.depth, pDstPix->drawable.bitsPerPixel, &dst->format);
+
+	switch (format) {
+	case fourcc_code('U', 'Y', 'V', 'Y'):
+		src->format.fmt = DE_FORMAT_UYVY;
+		tmp.format.fmt = DE_FORMAT_UYVY;
+//		dst->format.fmt = DE_FORMAT_UYVY;
+		break;
+	case fourcc_code('Y', 'U', 'Y', '2'):
+		src->format.fmt = DE_FORMAT_YUY2;
+		tmp.format.fmt = DE_FORMAT_YUY2;
+//		dst->format.fmt = DE_FORMAT_YUY2;
+		break;
+	case fourcc_code('Y', 'V', '1', '2'):
+		src->format.fmt = DE_FORMAT_YV12;
+		tmp.format.fmt = DE_FORMAT_YV12;
+//		dst->format.fmt = DE_FORMAT_YV12;
+		break;
+	case fourcc_code('I', '4', '2', '0'):
+		src->format.fmt = DE_FORMAT_YV12;
+		tmp.format.fmt = DE_FORMAT_YV12;
+//		dst->format.fmt = DE_FORMAT_YV12;
+		break;
+	}
+
+	s_w = pSrcBox->x2 - pSrcBox->x1;
+	s_h = pSrcBox->y2 - pSrcBox->y1;
+	d_w = pDstBox->x2 - pDstBox->x1;
+	d_h = pDstBox->y2 - pDstBox->y1;
+
+	int reserve = 14 + 12 + 4 + 10;
+	if (extraCount > 0)
+		reserve += 8;
+
+	etna_set_state_multi(v2d->stream, VIVS_DE_FILTER_KERNEL(0), KERNEL_STATE_SZ,
+			     xv_filter_kernel);
+
+	_Viv2DStreamReserve(v2d, reserve);
+	// 12
+	_Viv2DStreamSrc(v2d, src, pSrcBox->x1, pSrcBox->y1, pSrcPix->drawable.width, pSrcPix->drawable.height);
+
+	if (extraCount > 0) {
+		Viv2DPixmapPrivPtr upix = Viv2DPixmapPrivFromPixmap(extraPix[0]);
+		Viv2DPixmapPrivPtr vpix = Viv2DPixmapPrivFromPixmap(extraPix[1]);
+
+		etna_set_state_from_bo(v2d->stream, VIVS_DE_UPLANE_ADDRESS, upix->bo);
+		etna_set_state(v2d->stream, VIVS_DE_UPLANE_STRIDE, upix->pitch);
+		etna_set_state_from_bo(v2d->stream, VIVS_DE_VPLANE_ADDRESS, vpix->bo);
+		etna_set_state(v2d->stream, VIVS_DE_VPLANE_STRIDE, vpix->pitch);
+	}
+
+	// 14
+//	_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_HOR_FILTER_BLT, NULL);
+	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_HOR_FILTER_BLT, NULL);
+	
+		h_scale = s_w / d_w;
+		v_scale = 1 << 16;
+
+		x = pSrcBox->x1 + (pDstBox->x1) * h_scale;
+		y = pSrcBox->y1 + (pDstBox->y1) * v_scale;
+	
+	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
+	               VIVS_DE_STRETCH_FACTOR_LOW_X(h_scale));
+	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
+	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(v_scale));
+
+// 10
+//	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(x));
+//	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_HIGH, VIVS_DE_VR_SOURCE_ORIGIN_HIGH_Y(y));
+	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(0));
+	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_HIGH, VIVS_DE_VR_SOURCE_ORIGIN_HIGH_Y(0));
+
+	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
+	               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(pDstBox->x1) |
+	               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(pDstBox->y1));
+	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
+	               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(pDstBox->x2) |
+	               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(pDstBox->y2));
+	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_HORIZONTAL_BLIT);
+
+
+
+#if 1
+//	if (s_h != d_h << 16) {
+	_Viv2DStreamReserve(v2d, 12 + 14 + 10);
+	// 12
+	_Viv2DStreamSrc(v2d, src, pSrcBox->x1, pSrcBox->y1, pSrcPix->drawable.width, pSrcPix->drawable.height);
+//	_Viv2DStreamSrc(v2d, &tmp, 0, 0, pSrcPix->drawable.width, pSrcPix->drawable.height);
+	// 14
+	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_VER_FILTER_BLT, NULL);
+
+	
+		h_scale = 1 << 16;
+		v_scale = s_h / d_h;
+
+		x = pSrcBox->x1 + (pDstBox->x1) * h_scale;
+		y = pSrcBox->y1 + (pDstBox->y1) * v_scale;
+	
+/*
+			etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
+	               VIVS_DE_STRETCH_FACTOR_LOW_X(h_scale));
+	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
+	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(v_scale));
+*/
+	// 10
+//	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(x));
+//	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_HIGH, VIVS_DE_VR_SOURCE_ORIGIN_HIGH_Y(y));
+	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(0));
+	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_HIGH, VIVS_DE_VR_SOURCE_ORIGIN_HIGH_Y(0));
+
+	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
+	               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(pDstBox->x1) |
+	               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(pDstBox->y1));
+	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
+	               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(pDstBox->x2) |
+	               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(pDstBox->y2));
+	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_VERTICAL_BLIT);
+
+//	}
+#endif
+
+//	_Viv2DStreamCommit(v2d);
+etna_cmd_stream_finish(v2d->stream);
+/*	VIV2D_INFO_MSG("Viv2DPutTextureImage src:%p/%p %dx%d %s/%s dst:%p/%p %dx%d %s/%s",
+	               pSrcPix, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
+	               pDstPix, dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
+*/
+	etna_bo_del(tmp.bo);
+	return TRUE;
+}
+
 struct ARMSOCEXARec *
 InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 {
 	Viv2DEXAPtr v2d_exa = calloc(sizeof (*v2d_exa), 1);
-	struct ARMSOCEXARec *omap_exa = (struct ARMSOCEXARec *)v2d_exa;
+	struct ARMSOCEXARec *armsoc_exa = (struct ARMSOCEXARec *)v2d_exa;
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	ExaDriverPtr exa;
 	Viv2DPtr v2d = calloc(sizeof (*v2d), 1);
@@ -1715,12 +1972,18 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		goto fail;
 	}
 
-	omap_exa->CloseScreen = CloseScreen;
-	omap_exa->FreeScreen = FreeScreen;
+	armsoc_exa->CloseScreen = CloseScreen;
+	armsoc_exa->FreeScreen = FreeScreen;
+
+	etnaviv_init_filter_kernel();
+
+	armsoc_exa->Reattach = Viv2DReattach;
+	armsoc_exa->GetFormats = Viv2DGetFormats;
+	armsoc_exa->PutTextureImage = Viv2DPutTextureImage;
 
 	INFO_MSG("Viv2DEXA: initialized.");
 
-	return omap_exa;
+	return armsoc_exa;
 
 fail:
 	if (v2d_exa) {

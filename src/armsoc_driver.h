@@ -35,6 +35,7 @@
 #include "xf86Resources.h"
 #include "xf86RAC.h"
 #endif
+#include "xf86xv.h"
 #include "xf86drm.h"
 #include <errno.h>
 #include "armsoc_exa.h"
@@ -180,6 +181,9 @@ struct ARMSOCRec {
 	/* Size of the swap chain. Set to 1 if DRI2SwapLimit unsupported,
 	 * driNumBufs if early display enabled, otherwise driNumBufs-1 */
 	unsigned int                       swap_chain_size;
+
+
+	XF86VideoAdaptorPtr textureAdaptor;
 };
 
 /*

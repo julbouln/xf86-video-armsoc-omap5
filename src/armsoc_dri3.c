@@ -107,8 +107,10 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 	}
 
 	armsoc_bo_put_dmabuf(priv->bo, fd);
-	// FIXME: dirty
-	Viv2DReattach(pixmap, width, height, stride);
+
+	if(pARMSOC->pARMSOCEXA->Reattach)
+		pARMSOC->pARMSOCEXA->Reattach(pixmap, width, height, stride);
+
 	return pixmap;
 }
 

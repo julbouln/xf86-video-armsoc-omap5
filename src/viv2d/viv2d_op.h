@@ -73,9 +73,10 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 }
 
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d) {
-//	etna_cmd_stream_finish(v2d->stream);
 	VIV2D_DBG_MSG("_Viv2DStreamCommit %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	etna_cmd_stream_flush(v2d->stream);
+//	etna_cmd_stream_finish(v2d->stream);
+
 }
 
 static inline uint32_t Viv2DSrcConfig(Viv2DFormat *format) {

@@ -51,6 +51,18 @@ struct ARMSOCEXARec {
 	 */
 	Bool (*CloseScreen)(CLOSE_SCREEN_ARGS_DECL);
 
+	/** get formats supported by PutTextureImage() (for dri2 video..) */
+	#define MAX_FORMATS 16
+	unsigned int (*GetFormats)(unsigned int *formats);
+
+	Bool (*PutTextureImage)(PixmapPtr pSrcPix, BoxPtr pSrcBox,
+			PixmapPtr pOsdPix, BoxPtr pOsdBox,
+			PixmapPtr pDstPix, BoxPtr pDstBox,
+			unsigned int extraCount, PixmapPtr *extraPix,
+			unsigned int format);
+
+	void (*Reattach)(PixmapPtr pixmap, int width, int height, int stride);
+
 	/**
 	 * Called by X driver's FreeScreen() function at the end of each
 	 * server lifetime to free per-ScrnInfoRec data structures, to close
