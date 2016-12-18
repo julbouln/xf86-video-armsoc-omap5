@@ -325,6 +325,7 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 	ScreenPtr pScreen = pDstDraw->pScreen;
 	ARMSOCPortPrivPtr pPriv = (ARMSOCPortPrivPtr)data;
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(pScrn);
+
 	BoxRec srcb = {
 		.x1 = src_x,
 		.y1 = src_y,
@@ -353,6 +354,8 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 		depth = 8;
 		src_h2 = src_h / 2;
 		src_w2 = src_w / 2;
+//		src_h2 = src_h;
+//		src_w2 = src_w;
 		break;
 	case fourcc_code('U', 'Y', 'V', 'Y'):
 	case fourcc_code('Y', 'U', 'Y', 'V'):
@@ -386,7 +389,7 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 	/* note: ARMSOCVidCopyArea() handles the composite-clip, so we can
 	 * ignore clipBoxes
 	 */
-	drmVBlank vbl = { .request = {
+/*	drmVBlank vbl = { .request = {
 			.type = DRM_VBLANK_RELATIVE,
 			.sequence = 0,
 		}
@@ -395,23 +398,20 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 	ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
 	if (ret) {
 		ERROR_MSG("get vblank counter failed: %s", strerror(errno));
-//		return FALSE;
 	}
-
-//			return 0;
+*/
 	ret = ARMSOCVidCopyArea(&pPriv->pSrcPix[0]->drawable, &srcb,
 	                        NULL, NULL, pDstDraw, &dstb,
 	                        ARMSOCVideoPutTextureImage, pPriv, clipBoxes);
-
+/*
 	vbl.request.sequence = vbl.reply.sequence + 1;
 	vbl.request.type = DRM_VBLANK_ABSOLUTE;
 
 	ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
 	if (ret) {
 		ERROR_MSG("get vblank counter failed: %s", strerror(errno));
-//		return FALSE;
 	}
-
+*/
 	return ret;
 
 }

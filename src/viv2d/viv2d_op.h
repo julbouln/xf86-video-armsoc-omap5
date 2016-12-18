@@ -39,6 +39,18 @@ static inline void etna_set_state_from_bo(struct etna_cmd_stream *stream,
 	});
 }
 
+static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t base, uint32_t num, const uint32_t *values)
+{
+	int i;
+	if (num == 0) return;
+//	etna_cmd_stream_reserve(stream, 1 + num); /* 1 extra for potential alignment */
+	etna_emit_load_state(stream, base >> 2, num);
+	for (i = 0; i < num; i++) {
+		etna_cmd_stream_emit(stream, values[i]);
+	}
+
+}
+
 static inline void _Viv2DOpAddRect(Viv2DOp *op, int x, int y, int width, int height) {
 	Viv2DRect rect;
 	rect.x1 = x;
