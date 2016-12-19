@@ -57,7 +57,7 @@ struct ARMSOCEXARec {
 
 	Bool (*PutTextureImage)(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 			PixmapPtr pOsdPix, BoxPtr pOsdBox,
-			PixmapPtr pDstPix, BoxPtr pDstBox,
+			PixmapPtr pDstPix, BoxPtr pDstBox, BoxPtr fullDstBox,
 			unsigned int extraCount, PixmapPtr *extraPix,
 			unsigned int format);
 

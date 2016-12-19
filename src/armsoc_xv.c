@@ -82,6 +82,7 @@ typedef int (*ARMSOCPutTextureImageProc)(
     PixmapPtr pSrcPix, BoxPtr pSrcBox,
     PixmapPtr pOsdPix, BoxPtr pOsdBox,
     PixmapPtr pDstPix, BoxPtr pDstBox,
+    BoxPtr fullDstBox,
     void *closure);
 /**
  * Helper function to implement video blit, handling clipping, damage, etc..
@@ -158,7 +159,7 @@ ARMSOCVidCopyArea(DrawablePtr pSrcDraw, BoxPtr pSrcBox,
 		          dstb.x1, dstb.y1, dstb.x2, dstb.y2);
 
 		ret = PutTextureImage(pSrcPix, &srcb, pOsdPix, &osdb,
-		                      pDstPix, &dstb, closure);
+		                      pDstPix, &dstb, pDstBox, closure);
 		if (ret != Success) {
 			break;
 		}
@@ -272,6 +273,7 @@ static int ARMSOCVideoPutTextureImage(
     PixmapPtr pSrcPix, BoxPtr pSrcBox,
     PixmapPtr pOsdPix, BoxPtr pOsdBox,
     PixmapPtr pDstPix, BoxPtr pDstBox,
+    BoxPtr fullDstBox,
     void *closure)
 {
 	ScreenPtr pScreen = pDstPix->drawable.pScreen;
@@ -288,7 +290,7 @@ static int ARMSOCVideoPutTextureImage(
 	          pDstBox->x1, pDstBox->y1, pDstBox->x2, pDstBox->y2);
 
 	ret = pARMSOC->pARMSOCEXA->PutTextureImage(pSrcPix, pSrcBox,
-	        pOsdPix, pOsdBox, pDstPix, pDstBox,
+	        pOsdPix, pOsdBox, pDstPix, pDstBox, fullDstBox,
 	        pPriv->nplanes - 1, &pPriv->pSrcPix[1],
 	        pPriv->format);
 	if (ret) {
@@ -354,8 +356,6 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 		depth = 8;
 		src_h2 = src_h / 2;
 		src_w2 = src_w / 2;
-//		src_h2 = src_h;
-//		src_w2 = src_w;
 		break;
 	case fourcc_code('U', 'Y', 'V', 'Y'):
 	case fourcc_code('Y', 'U', 'Y', 'V'):

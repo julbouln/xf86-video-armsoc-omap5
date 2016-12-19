@@ -1686,31 +1686,50 @@ static void etnaviv_init_filter_kernel(void)
 }
 
 
-
+// NOTE: filter blit VIVS_DE_VR_SOURCE_IMAGE* does not work, so we need to convert to an intermediate surface before doing a standard bitblt
+// there is room for optimization, since in case of clipping we convert the full source for each clip
+// in case pDstBox == fullDstBox we avoid the tmp_dest blit operation and blit directly to dest
 static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
                                  PixmapPtr pOsdPix, BoxPtr pOsdBox,
                                  PixmapPtr pDstPix, BoxPtr pDstBox,
+                                 BoxPtr fullDstBox,
                                  unsigned int extraCount, PixmapPtr *extraPix, unsigned int format) {
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pDstPix);
 	Viv2DPixmapPrivPtr src = Viv2DPixmapPrivFromPixmap(pSrcPix);
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDstPix);
 	uint32_t v_scale, h_scale;
-	Viv2DPixmapPrivRec tmp;
-	int reserve=0;
+	Viv2DPixmapPrivRec tmp, tmp_dest;
+	Bool tmp_bitblt = TRUE;
+	int reserve = 0;
 
-	int s_w = pSrcBox->x2 - pSrcBox->x1;
-	int s_h = pSrcBox->y2 - pSrcBox->y1;
-	int d_w = pDstBox->x2 - pDstBox->x1;
-	int d_h = pDstBox->y2 - pDstBox->y1;
+	int s_w = pSrcPix->drawable.width;
+	int s_h = pSrcPix->drawable.height;
+	int d_w = fullDstBox->x2 - fullDstBox->x1;
+	int d_h = fullDstBox->y2 - fullDstBox->y1;
+
+	if (fullDstBox->x1 == pDstBox->x1 && fullDstBox->y1 == pDstBox->y1 && fullDstBox->x2 == pDstBox->x2 && fullDstBox->y2 == pDstBox->y2)
+		tmp_bitblt = FALSE;
 
 	tmp.width = d_w;
 	tmp.height = s_h;
-//	tmp.height = d_h;
-//	tmp.pitch = dst->pitch;
 	tmp.pitch = ALIGN(tmp.width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
 
 	Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
 	tmp.bo = etna_bo_new(v2d->dev, tmp.pitch * tmp.height, ETNA_BO_UNCACHED);
+
+	if (tmp_bitblt) {
+		tmp_dest.width = d_w;
+		tmp_dest.height = d_h;
+		tmp_dest.pitch = ALIGN(tmp_dest.width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+
+		Viv2DSetFormat(32, 32, &tmp_dest.format); // A8R8G8B8
+		tmp_dest.bo = etna_bo_new(v2d->dev, tmp_dest.pitch * tmp_dest.height, ETNA_BO_UNCACHED);
+	} else {
+		tmp_dest.width = 0;
+		tmp_dest.height = 0;
+		tmp_dest.pitch = 0;
+		tmp_dest.bo = NULL;
+	}
 
 	Viv2DSetFormat(pSrcPix->drawable.depth, pSrcPix->drawable.bitsPerPixel, &src->format);
 	Viv2DSetFormat(pDstPix->drawable.depth, pDstPix->drawable.bitsPerPixel, &dst->format);
@@ -1733,11 +1752,13 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	h_scale = ((s_w - 1) << 16) / (d_w - 1);
 	v_scale = ((s_h - 1) << 16) / (d_h - 1);
 
-	reserve += 12 + 14 + 2 + 4 + 6 + 10; // horizontal
+	reserve += 8 + 14 + 2 + 4 + 6 + 10; // horizontal
 	if (extraCount > 0) // planar
-		reserve += 8; 
-	reserve += 12 + 14 + 2 + 4 + 6 + 10; // vertical
+		reserve += 8;
+	reserve += 8 + 14 + 2 + 4 + 6 + 10; // vertical
 	reserve += KERNEL_STATE_SZ + 1; // filter kernel
+	if (tmp_bitblt)
+		reserve += 14 + 12 + 4; // final blit
 
 	_Viv2DStreamReserve(v2d, reserve);
 
@@ -1745,8 +1766,11 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	etna_set_state_multi(v2d->stream, VIVS_DE_FILTER_KERNEL(0), KERNEL_STATE_SZ,
 	                     xv_filter_kernel);
 
-	// 12
-	_Viv2DStreamSrc(v2d, src, pSrcBox->x1, pSrcBox->y1, s_w, s_h);
+	// 8
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, src->pitch);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(&src->format));
 
 	if (extraCount > 0) {
 		// 8
@@ -1761,30 +1785,25 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 
 	// 14
 	_Viv2DStreamDst(v2d, &tmp, VIVS_DE_DEST_CONFIG_COMMAND_HOR_FILTER_BLT, NULL);
-//	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_HOR_FILTER_BLT, NULL);
 
 	// 2
 	etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
-		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
+	               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
 	// 4
 	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
 	               VIVS_DE_STRETCH_FACTOR_LOW_X(h_scale));
 	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
 	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(1 << 16));
 
-/*	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
-	               VIVS_DE_STRETCH_FACTOR_LOW_X(h_scale));
-	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
-	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(v_scale));
-*/
 	// 6
+	// Apparently, this does not work
 	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG_EX, 0);
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_LOW,
-	               VIVS_DE_VR_SOURCE_IMAGE_LOW_LEFT(pSrcBox->x1) |
-	               VIVS_DE_VR_SOURCE_IMAGE_LOW_TOP(pSrcBox->y1));
+	               VIVS_DE_VR_SOURCE_IMAGE_LOW_LEFT(0) |
+	               VIVS_DE_VR_SOURCE_IMAGE_LOW_TOP(0));
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_HIGH,
-	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_RIGHT(pSrcBox->x2) |
-	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_BOTTOM(pSrcBox->y2));
+	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_RIGHT(s_w) |
+	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_BOTTOM(s_h));
 
 	// 10
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(0));
@@ -1797,39 +1816,29 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(tmp.width) |
 	               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(tmp.height));
 
-/*	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
-	               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(pDstBox->x1) |
-	               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(pDstBox->y1));
-	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
-	               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(pDstBox->x2) |
-	               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(pDstBox->y2));
-*/
 	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_HORIZONTAL_BLIT);
 
-//	_Viv2DStreamReserve(v2d, 12 + 14 + 6 + 10);
-
-	// 12
-//	_Viv2DStreamSrc(v2d, src, pSrcBox->x1, pSrcBox->y1, pSrcPix->drawable.width, pSrcPix->drawable.height);
-	_Viv2DStreamSrc(v2d, &tmp, 0, 0, tmp.width, tmp.height);
+	// 8
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, tmp.bo);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, tmp.pitch);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(&tmp.format));
 
 	// 14
-	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_VER_FILTER_BLT, NULL);
+	if (tmp_bitblt)
+		_Viv2DStreamDst(v2d, &tmp_dest, VIVS_DE_DEST_CONFIG_COMMAND_VER_FILTER_BLT, NULL);
+	else
+		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_VER_FILTER_BLT, NULL);
 
-// 2
-etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
-		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
+	// 2
+	etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
+	               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
 	// 4
 	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
 	               VIVS_DE_STRETCH_FACTOR_LOW_X(1 << 16));
 	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
 	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(v_scale));
 
-/*
-	               	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_LOW,
-	               VIVS_DE_STRETCH_FACTOR_LOW_X(1 << 16));
-	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
-	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(1 << 16));
-*/
 	// 6
 	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG_EX, 0);
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_LOW,
@@ -1838,41 +1847,66 @@ etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_HIGH,
 	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_RIGHT(tmp.width) |
 	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_BOTTOM(tmp.height));
-	               
-/*	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_LOW,
-	               VIVS_DE_VR_SOURCE_IMAGE_LOW_LEFT(pSrcBox->x1) |
-	               VIVS_DE_VR_SOURCE_IMAGE_LOW_TOP(pSrcBox->y1));
-	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_IMAGE_HIGH,
-	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_RIGHT(pSrcBox->x2) |
-	               VIVS_DE_VR_SOURCE_IMAGE_HIGH_BOTTOM(pSrcBox->y2));
-*/
+
 	// 10
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_LOW, VIVS_DE_VR_SOURCE_ORIGIN_LOW_X(0));
 	etna_set_state(v2d->stream, VIVS_DE_VR_SOURCE_ORIGIN_HIGH, VIVS_DE_VR_SOURCE_ORIGIN_HIGH_Y(0));
 
-	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
-	               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(pDstBox->x1) |
-	               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(pDstBox->y1));
-	etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
-	               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(pDstBox->x2) |
-	               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(pDstBox->y2));
-	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_VERTICAL_BLIT);
+	if (tmp_bitblt) {
+		etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
+		               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(0) |
+		               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(0));
+		etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
+		               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(d_w) |
+		               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(d_h));
+		etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_VERTICAL_BLIT);
+	} else {
+		etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_LOW,
+		               VIVS_DE_VR_TARGET_WINDOW_LOW_LEFT(pDstBox->x1) |
+		               VIVS_DE_VR_TARGET_WINDOW_LOW_TOP(pDstBox->y1));
+		etna_set_state(v2d->stream, VIVS_DE_VR_TARGET_WINDOW_HIGH,
+		               VIVS_DE_VR_TARGET_WINDOW_HIGH_RIGHT(pDstBox->x2) |
+		               VIVS_DE_VR_TARGET_WINDOW_HIGH_BOTTOM(pDstBox->y2));
+		etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_VERTICAL_BLIT);
+
+	}
+
+	// blit to clip
+	if (tmp_bitblt) {
+		Viv2DRect drect[1];
+		drect[0].x1 = pDstBox->x1;
+		drect[0].y1 = pDstBox->y1;
+		drect[0].x2 = pDstBox->x2;
+		drect[0].y2 = pDstBox->y2;
+
+		// 12
+		_Viv2DStreamSrc(v2d, &tmp_dest, pDstBox->x1 - fullDstBox->x1, pDstBox->y1 - fullDstBox->y1,
+		                pDstBox->x2 - pDstBox->x1, pDstBox->y2 - pDstBox->y1);
+		// 14
+		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
+
+		// 4
+		_Viv2DStreamRects(v2d, drect, 1);
+	}
 
 //	_Viv2DStreamCommit(v2d);
 	etna_cmd_stream_finish(v2d->stream);
-	VIV2D_DBG_MSG("Viv2DPutTextureImage %d src:%p/%p(%dx%d) %d %dx%d:%dx%d %s/%s dst:%p/%p(%dx%d) %d %dx%d:%dx%d %s/%s tmp:%dx%d %d : %dx%d",
-	              reserve+KERNEL_STATE_SZ+1,
+	VIV2D_DBG_MSG("Viv2DPutTextureImage %d src:%p/%p(%dx%d) %d %dx%d:%dx%d %s/%s dst:%p/%p(%dx%d) %d %dx%d:%dx%d %s/%s full:%dx%d:%dx%d tmp:%dx%d %d : %dx%d",
+	              reserve + KERNEL_STATE_SZ + 1,
 	              pSrcPix, src, src->width, src->height, src->pitch,
 	              pSrcBox->x1, pSrcBox->y1, pSrcBox->x2, pSrcBox->y2,
 	              Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
 	              pDstPix, dst, dst->width, dst->height, dst->pitch,
 	              pDstBox->x1, pDstBox->y1, pDstBox->x2, pDstBox->y2,
 	              Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
+	              fullDstBox->x1, fullDstBox->y1, fullDstBox->x2, fullDstBox->y2,
 	              tmp.width, tmp.height, tmp.pitch,
 	              v_scale, h_scale);
 
 
 	etna_bo_del(tmp.bo);
+	if (tmp_bitblt)
+		etna_bo_del(tmp_dest.bo);
 	return TRUE;
 }
 
