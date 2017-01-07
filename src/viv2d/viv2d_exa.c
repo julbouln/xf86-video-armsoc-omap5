@@ -1551,9 +1551,9 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
 			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
-			_Viv2DStreamCommit(v2d); // why this is needed ?
 		}
 	}
+	_Viv2DStreamCommit(v2d); // why this is needed ?
 
 }
 
