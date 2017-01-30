@@ -1880,7 +1880,7 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 		drect[0].y2 = pDstBox->y2;
 
 		// 12
-		_Viv2DStreamSrc(v2d, &tmp_dest, pDstBox->x1 - fullDstBox->x1, pDstBox->y1 - fullDstBox->y1,
+		_Viv2DStreamSrc(v2d, &tmp_dest, 0, 0,
 		                pDstBox->x2 - pDstBox->x1, pDstBox->y2 - pDstBox->y1);
 		// 14
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
