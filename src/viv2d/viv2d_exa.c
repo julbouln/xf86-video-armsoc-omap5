@@ -51,7 +51,6 @@
 #include "viv2d_exa.h"
 #include "viv2d_op.h"
 
-//#define VIV2D_STREAM_SIZE 2048
 #define VIV2D_STREAM_SIZE 4096
 
 #define VIV2D_SOLID 1
@@ -67,7 +66,9 @@
 #define VIV2D_SUPPORT_A8_SRC 1
 #define VIV2D_SUPPORT_A8_MASK 1
 
-#define VIV2D_PITCH_ALIGN 16
+//#define VIV2D_SUPPORT_A8_DST 1
+
+#define VIV2D_PITCH_ALIGN 32
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 
@@ -491,7 +492,32 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
  * UploadToScreen() is not required, but is recommended if Composite
  * acceleration is supported.
  */
+
+#if 0
+struct etna_bo *etna_bo_from_usermem_prot(Viv2DPtr v2d, void *memory, size_t size) {
+	struct etna_bo *mem;
+	struct drm_etnaviv_gem_userptr req = {
+		.user_ptr = (uintptr_t)memory,
+		.user_size = size,
+		.flags = (ETNA_USERPTR_READ | ETNA_USERPTR_WRITE),
+	};
+	int err;
+
+	err = drmCommandWriteRead(v2d->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
+	                          sizeof(req));
+	if (err)
+		mem = NULL;
+	else {
+		mem = etna_bo_from_handle(v2d->dev, req.handle, size);
+		VIV2D_INFO_MSG("etna_bo_from_usermem_prot bo from handle %d", req.handle);
+
+	}
+	return mem;
+}
+#endif
+
 #ifdef VIV2D_UPLOAD_TO_SCREEN
+
 static Bool Viv2DUploadToScreen(PixmapPtr pDst,
                                 int x,
                                 int y, int w, int h, char *src, int src_pitch) {
@@ -521,10 +547,12 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 		return FALSE;
 	}
 
+#ifndef VIV2D_SUPPORT_A8_DST
 	if (dst->format.fmt == DE_FORMAT_A8) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported dst A8");
 		return FALSE;
 	}
+#endif
 
 	dst->refcnt++;
 
@@ -535,17 +563,20 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 	pitch = pix.pitch;
 	size = pitch * pix.height;
-	pix.bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
 
-	src_buf = src ;
-	buf = (char *) etna_bo_map(pix.bo);
+//	pix.bo = etna_bo_from_usermem_prot(v2d, src, size);
+	if (!pix.bo) {
+		pix.bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
 
-	while (height--) {
-		memcpy(buf, src_buf, pitch);
-		src_buf += src_pitch;
-		buf += pitch;
+		src_buf = src ;
+		buf = (char *) etna_bo_map(pix.bo);
+
+		while (height--) {
+			memcpy(buf, src_buf, pitch);
+			src_buf += src_pitch;
+			buf += pitch;
+		}
 	}
-
 	rects[0].x1 = x;
 	rects[0].y1 = y;
 	rects[0].x2 = x + w;
@@ -662,10 +693,12 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 		return FALSE;
 	}
 
+#ifndef VIV2D_SUPPORT_A8_DST
 	if (dst->format.fmt == DE_FORMAT_A8) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareSolid dst:%p unsupported dst A8 %x", pPixmap, fg);
 		return FALSE;
 	}
+#endif
 
 	dst->refcnt++;
 
@@ -816,10 +849,12 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 		return FALSE;
 	}
 
+#ifndef VIV2D_SUPPORT_A8_DST
 	if (dst->format.fmt == DE_FORMAT_A8) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareCopy dst:%p unsupported dst A8", pDstPixmap);
 		return FALSE;
 	}
+#endif
 
 	dst->refcnt++;
 
@@ -1055,11 +1090,12 @@ Viv2DCheckComposite (int op,
 		return FALSE;
 	}
 
+#ifndef VIV2D_SUPPORT_A8_DST
 	if (dst_fmt.fmt == DE_FORMAT_A8) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite dst:%p unsupported dst A8", pDst);
 		return FALSE;
 	}
-
+#endif
 
 #ifndef VIV2D_SUPPORT_A8_SRC
 	// src A8 seems to have a problem
@@ -1402,7 +1438,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		Viv2DSetFormat(32, 32, &tmp.format); // A8R8G8B8
 
 		// for some reasons, there is problem with non A8R8G8B8 surfaces
-//
 		if ((v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
 		        (v2d->op.msk && v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
 		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
@@ -1465,7 +1500,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 					tmp_dest.height = height;
 					tmp_dest.pitch = pitch;
 					Viv2DSetFormat(32, 32, &tmp_dest.format); // A8R8G8B8
-
 
 					_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.dst, &v2d->op.dst->format, 0, &tmp_dest,
 					                 NULL, dstX, dstY, width, height, mrect, 1);
@@ -1551,9 +1585,9 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
 			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
+			_Viv2DStreamCommit(v2d); // why this is needed ?
 		}
 	}
-	_Viv2DStreamCommit(v2d); // why this is needed ?
 
 }
 

@@ -79,7 +79,37 @@ struct drm_omap_gem_new {
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
 static int init_plane_for_cursor(int drm_fd, uint32_t plane_id) {
-	return 0;
+	int res = -1;
+	drmModeObjectPropertiesPtr props;
+	props = drmModeObjectGetProperties(drm_fd, plane_id,
+	                                   DRM_MODE_OBJECT_PLANE);
+
+	if (props) {
+		int i;
+
+		for (i = 0; i < props->count_props; i++) {
+			drmModePropertyPtr this_prop;
+			this_prop = drmModeGetProperty(drm_fd, props->props[i]);
+
+			if (this_prop) {
+				if (!strncmp(this_prop->name, "zpos",
+				             DRM_PROP_NAME_LEN)) {
+					res = drmModeObjectSetProperty(drm_fd,
+					                               plane_id,
+					                               DRM_MODE_OBJECT_PLANE,
+					                               this_prop->prop_id,
+					                               1);
+					drmModeFreeProperty(this_prop);
+					break;
+				}
+				drmModeFreeProperty(this_prop);
+			}
+
+		}
+		drmModeFreeObjectProperties(props);
+	}
+
+	return res;
 }
 
 static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
@@ -123,8 +153,8 @@ struct drmmode_interface omap_interface = {
 	CURSORW               /* cursor width */,
 	CURSORH               /* cursor_height */,
 	CURSORPAD             /* cursor padding */,
-	HWCURSOR_API_NONE /* cursor_api */,
-	NULL /* init_plane_for_cursor */,
+	HWCURSOR_API_PLANE /* cursor_api */,
+	init_plane_for_cursor /* init_plane_for_cursor */,
 	0                     /* vblank_query_supported */,
 	create_custom_gem     /* create_custom_gem */,
 };
