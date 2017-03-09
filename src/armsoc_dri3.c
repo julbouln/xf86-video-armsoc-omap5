@@ -129,7 +129,7 @@ static int ARMSOCDRI3FDFromPixmap(ScreenPtr pScreen, PixmapPtr pixmap,
 	*stride = pixmap->devKind;
 	*size = armsoc_bo_size(priv->bo);
 
-	return armosc_bo_get_dmabuf(priv->bo);
+	return armsoc_bo_get_dmabuf(priv->bo);
 }
 
 static dri3_screen_info_rec armsoc_dri3_info = {

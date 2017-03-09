@@ -250,4 +250,9 @@ void ARMSOCDRI2VBlankHandler(unsigned int sequence, unsigned int tv_sec, unsigne
  */
 void set_scanout_bo(ScrnInfoPtr pScrn, struct armsoc_bo *bo);
 
+Bool ARMSOCVideoScreenInit(ScreenPtr pScreen);
+Bool armsoc_present_screen_init(ScreenPtr screen);
+Bool ARMSOCDRI3ScreenInit(ScreenPtr pScreen);
+struct ARMSOCEXARec *InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd);
+
 #endif /* __ARMSOC_DRV_H__ */
