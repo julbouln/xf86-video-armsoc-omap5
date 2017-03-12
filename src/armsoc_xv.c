@@ -89,7 +89,7 @@ typedef int (*ARMSOCPutTextureImageProc)(
  *
  * TODO: move to EXA?
  */
-int
+static int
 ARMSOCVidCopyArea(DrawablePtr pSrcDraw, BoxPtr pSrcBox,
                   DrawablePtr pOsdDraw, BoxPtr pOsdBox,
                   DrawablePtr pDstDraw, BoxPtr pDstBox,
@@ -326,7 +326,7 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 	int ret;
 	ScreenPtr pScreen = pDstDraw->pScreen;
 	ARMSOCPortPrivPtr pPriv = (ARMSOCPortPrivPtr)data;
-	struct ARMSOCRec * pARMSOC = ARMSOCPTR(pScrn);
+//	struct ARMSOCRec * pARMSOC = ARMSOCPTR(pScrn);
 
 	BoxRec srcb = {
 		.x1 = src_x,

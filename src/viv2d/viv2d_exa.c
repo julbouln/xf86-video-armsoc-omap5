@@ -173,7 +173,7 @@ static inline void Viv2DFinishPix(Viv2DRec *v2d, Viv2DPixmapPrivPtr pix) {
 
 static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
 	if (armsocPix) {
-		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
+//		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
 		if (armsocPix->bo == pARMSOC->scanout) {
@@ -899,8 +899,6 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 static void Viv2DCopy (PixmapPtr pDstPixmap,
                        int srcX,
                        int srcY, int dstX, int dstY, int width, int height) {
-	ScrnInfoPtr pScrn = pix2scrn(pDstPixmap);
-	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromPixmap(pDstPixmap);
 
 	// new srcX,srcY group
@@ -942,7 +940,7 @@ static void Viv2DCopy (PixmapPtr pDstPixmap,
 static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 	ScrnInfoPtr pScrn = pix2scrn(pDstPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pDstPixmap);
+//	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pDstPixmap);
 
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 

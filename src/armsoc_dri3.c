@@ -144,7 +144,6 @@ Bool ARMSOCDRI3ScreenInit(ScreenPtr pScreen)
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct stat st;
-	char buf[64];
 
 	if (!pARMSOC)
 		return FALSE;

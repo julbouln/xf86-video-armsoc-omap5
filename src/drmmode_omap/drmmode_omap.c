@@ -118,6 +118,8 @@ static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
 	unsigned int pitch;
 	unsigned int flags = OMAP_BO_WC;
 	uint32_t size;
+	union omap_gem_size gsize;
+	struct drm_omap_gem_new create_omap;
 
 	/* 32 bytes pitch for OMAP = 16 bytes pitch for gc320 */
 	pitch = ALIGN(create_gem->width * ((create_gem->bpp + 7) / 8), 32);
@@ -126,13 +128,9 @@ static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
 		flags |= OMAP_BO_SCANOUT;
 
 	size = create_gem->height * pitch;
-	union omap_gem_size gsize = {
-		.bytes = size,
-	};
-	struct drm_omap_gem_new create_omap = {
-		.size = gsize,
-		.flags = flags,
-	};
+	gsize.bytes = size;
+	create_omap.size = gsize;
+	create_omap.flags = flags;
 
 	ret = drmIoctl(fd, DRM_IOCTL_OMAP_GEM_NEW, &create_omap);
 	if (ret)

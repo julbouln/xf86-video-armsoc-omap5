@@ -116,7 +116,7 @@ static int armsoc_box_area(BoxPtr box)
 	return (int)(box->x2 - box->x1) * (int)(box->y2 - box->y1);
 }
 
-Bool
+static Bool
 armsoc_crtc_on(xf86CrtcPtr crtc)
 {
 	struct drmmode_crtc_private_rec * drmmode_crtc = crtc->driver_private;
@@ -131,7 +131,7 @@ armsoc_crtc_on(xf86CrtcPtr crtc)
  * with greater coverage
  */
 
-xf86CrtcPtr
+static xf86CrtcPtr
 armsoc_covering_crtc(ScrnInfoPtr scrn,
                      BoxPtr box, xf86CrtcPtr desired, BoxPtr crtc_box_ret)
 {
@@ -170,7 +170,7 @@ armsoc_covering_crtc(ScrnInfoPtr scrn,
 	return best_crtc;
 }
 
-xf86CrtcPtr
+static xf86CrtcPtr
 armsoc_crtc_covering_drawable(DrawablePtr pDraw)
 {
 	ScreenPtr pScreen = pDraw->pScreen;
@@ -190,6 +190,7 @@ static Bool
 armsoc_get_kernel_ust_msc(xf86CrtcPtr crtc,
                           uint32_t *msc, uint64_t *ust)
 {
+#ifdef ARMSOC_PRESENT_WAIT_VBLANK
 	ScreenPtr screen = crtc->randr_crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(scrn);
@@ -201,7 +202,6 @@ armsoc_get_kernel_ust_msc(xf86CrtcPtr crtc,
 	vbl.request.type = DRM_VBLANK_RELATIVE | drmmode_crtc->vblank_pipe;
 	vbl.request.sequence = 0;
 	vbl.request.signal = 0;
-#ifdef ARMSOC_PRESENT_WAIT_VBLANK
 
 	ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
 	if (ret) {
@@ -211,14 +211,15 @@ armsoc_get_kernel_ust_msc(xf86CrtcPtr crtc,
 	} else {
 		*msc = vbl.reply.sequence;
 		*ust = (CARD64) vbl.reply.tval_sec * 1000000 + vbl.reply.tval_usec;
-		ARMSOC_PRESENT_DBG_MSG("armsoc_get_kernel_ust_msc msc:%d ust:%d",*msc,*ust);
+		ARMSOC_PRESENT_DBG_MSG("armsoc_get_kernel_ust_msc msc:%d ust:%d", *msc, *ust);
 		return TRUE;
 	}
 #else
-		*msc = vbl.reply.sequence;
-		*ust = (CARD64) vbl.reply.tval_sec * 1000000 + vbl.reply.tval_usec;
-		ARMSOC_PRESENT_DBG_MSG("armsoc_get_kernel_ust_msc msc:%d ust:%d",*msc,*ust);
-		return TRUE;
+	*msc = 0;
+	*ust = 0;
+
+	ARMSOC_PRESENT_DBG_MSG("armsoc_get_kernel_ust_msc msc:%d ust:%d", *msc, *ust);
+	return TRUE;
 #endif
 
 }
@@ -228,7 +229,7 @@ armsoc_get_kernel_ust_msc(xf86CrtcPtr crtc,
  * number, adding in the vblank_offset and high 32 bits, and dealing
  * with 64-bit wrapping
  */
-uint64_t
+static uint64_t
 armsoc_kernel_msc_to_crtc_msc(xf86CrtcPtr crtc, uint32_t sequence)
 {
 	struct drmmode_crtc_private_rec *drmmode_crtc = crtc->driver_private;
@@ -240,7 +241,7 @@ armsoc_kernel_msc_to_crtc_msc(xf86CrtcPtr crtc, uint32_t sequence)
 	return drmmode_crtc->msc_high + sequence;
 }
 
-int
+static int
 armsoc_get_crtc_ust_msc(xf86CrtcPtr crtc, CARD64 *ust, CARD64 *msc)
 {
 	uint32_t kernel_msc;
@@ -259,7 +260,7 @@ armsoc_get_crtc_ust_msc(xf86CrtcPtr crtc, CARD64 *ust, CARD64 *msc)
  * Enqueue a potential drm response; when the associated response
  * appears, we've got data to pass to the handler from here
  */
-uint32_t
+static uint32_t
 armsoc_drm_queue_alloc(xf86CrtcPtr crtc,
                        void *data,
                        armsoc_drm_handler_proc handler,
@@ -304,6 +305,7 @@ armsoc_drm_abort_one(struct armsoc_drm_queue *q)
  * Abort all queued entries on a specific scrn, used
  * when resetting the X server
  */
+/*
 static void
 armsoc_drm_abort_scrn(ScrnInfoPtr scrn)
 {
@@ -314,11 +316,12 @@ armsoc_drm_abort_scrn(ScrnInfoPtr scrn)
 			armsoc_drm_abort_one(q);
 	}
 }
+*/
 
 /**
  * Abort by drm queue sequence number.
  */
-void
+static void
 armsoc_drm_abort_seq(ScrnInfoPtr scrn, uint32_t seq)
 {
 	struct armsoc_drm_queue *q, *tmp;
@@ -335,7 +338,7 @@ armsoc_drm_abort_seq(ScrnInfoPtr scrn, uint32_t seq)
  * Externally usable abort function that uses a callback to match a single
  * queued entry to abort
  */
-void
+static void
 armsoc_drm_abort(ScrnInfoPtr scrn, Bool (*match)(void *data, void *match_data),
                  void *match_data)
 {
@@ -358,7 +361,7 @@ armsoc_drm_abort(ScrnInfoPtr scrn, Bool (*match)(void *data, void *match_data),
  * Returns a negative value on error, 0 if there was nothing to process,
  * or 1 if we handled any events.
  */
-int
+static int
 armsoc_flush_drm_events(ScreenPtr screen)
 {
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
@@ -430,7 +433,7 @@ armsoc_present_vblank_handler(uint64_t msc, uint64_t usec, void *data)
  * This also updates the vblank_offset when it notices that the value should
  * change.
  */
-uint32_t
+static uint32_t
 armsoc_crtc_msc_to_kernel_msc(xf86CrtcPtr crtc, uint64_t expect)
 {
 	struct drmmode_crtc_private_rec *drmmode_crtc = crtc->driver_private;
@@ -460,9 +463,8 @@ armsoc_crtc_msc_to_kernel_msc(xf86CrtcPtr crtc, uint64_t expect)
 static void
 armsoc_present_vblank_abort(void *data)
 {
-	ARMSOC_PRESENT_DBG_MSG("armsoc_present_vblank_abort");
 	struct armsoc_present_vblank_event *event = data;
-
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_vblank_abort");
 	ARMSOC_PRESENT_DBG_MSG("\t\tma %lld\n", (long long) event->event_id);
 
 	free(event);
@@ -477,7 +479,6 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
                             uint64_t event_id,
                             uint64_t msc)
 {
-	ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank");
 	xf86CrtcPtr xf86_crtc = crtc->devPrivate;
 	ScreenPtr screen = crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
@@ -488,6 +489,8 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 	drmVBlank vbl;
 	int ret;
 	uint32_t seq;
+
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank");
 
 	event = calloc(sizeof(struct armsoc_present_vblank_event), 1);
 	if (!event)
@@ -530,9 +533,9 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 static Bool
 armsoc_present_event_match(void *data, void *match_data)
 {
-	ARMSOC_PRESENT_DBG_MSG("armsoc_present_event_match");
 	struct armsoc_present_vblank_event *event = data;
 	uint64_t *match = match_data;
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_event_match");
 
 	return *match == event->event_id;
 }
@@ -544,9 +547,9 @@ armsoc_present_event_match(void *data, void *match_data)
 static void
 armsoc_present_abort_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 {
-	ARMSOC_PRESENT_DBG_MSG("armsoc_present_abort_vblank");
 	ScreenPtr screen = crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_abort_vblank");
 
 	armsoc_drm_abort(scrn, armsoc_present_event_match, &event_id);
 }

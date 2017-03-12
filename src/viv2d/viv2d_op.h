@@ -342,5 +342,4 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 	_Viv2DStreamRects(v2d, rects, cur_rect);
 }
 
-
 #endif
