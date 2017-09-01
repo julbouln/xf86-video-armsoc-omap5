@@ -974,22 +974,16 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 		pARMSOC->pARMSOCEXA = InitNullEXA(pScreen, pScrn,
 								pARMSOC->drmFD);
 	if (pARMSOC->pARMSOCEXA) {
-//		pARMSOC->dri = ARMSOCDRI2ScreenInit(pScreen); // DRI2
-		pARMSOC->dri = ARMSOCDRI3ScreenInit(pScreen); // DRI3
+		pARMSOC->dri2 = ARMSOCDRI2ScreenInit(pScreen); // DRI2
+		pARMSOC->dri3 = ARMSOCDRI3ScreenInit(pScreen); // DRI3
 		armsoc_present_screen_init(pScreen); // Present
 		ARMSOCVideoScreenInit(pScreen); // XV
 	}
-	else
-		pARMSOC->dri = FALSE;
+	else {
+		pARMSOC->dri2 = FALSE;
+		pARMSOC->dri3 = FALSE;		
+	}
 
-		pARMSOC->dri = FALSE;
-
-	/*
-	if (pARMSOC->pARMSOCEXA)
-		pARMSOC->dri = ARMSOCDRI2ScreenInit(pScreen);
-	else
-		pARMSOC->dri = FALSE;
-		*/
 }
 
 /**
@@ -1213,7 +1207,7 @@ fail6:
 	drmmode_cursor_fini(pScreen);
 
 fail5:
-	if (pARMSOC->dri)
+	if (pARMSOC->dri2)
 		ARMSOCDRI2CloseScreen(pScreen);
 
 	if (pARMSOC->pARMSOCEXA)
@@ -1292,7 +1286,7 @@ ARMSOCCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 
 	ret = (*pScreen->CloseScreen)(CLOSE_SCREEN_ARGS);
 
-	if (pARMSOC->dri)
+	if (pARMSOC->dri2)
 		ARMSOCDRI2CloseScreen(pScreen);
 
 	if (pARMSOC->pARMSOCEXA)

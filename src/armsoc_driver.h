@@ -130,7 +130,8 @@ struct ARMSOCRec {
 	struct ARMSOCEXARec	*pARMSOCEXA;
 
 	/** record if ARMSOCDRI2ScreenInit() was successful */
-	Bool				dri;
+	Bool				dri2;
+	Bool				dri3;
 
 	/** user-configurable option: */
 	Bool				NoFlip;
