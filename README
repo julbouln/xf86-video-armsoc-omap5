@@ -1,7 +1,21 @@
 X.org graphics driver for OMAP AM57x
 
 Features:
-- EXA GC320 2D acceleration with etnaviv
-- DRI3
+- EXA and Xv GC320 2D acceleration with etnaviv
+- DRI2 & DRI3
+
+Install:
+./autogen.sh
+./configure --prefix=/usr
+make
+sudo make install
+
+xorg.conf configuration:
+
+Section "Device"
+    Identifier  "Builtin Default fbdev Device 0"
+	Driver		"omap5"
+	Option 		"DRICard" "1" # must point to the /dev/dri/cardX corresponding to omapdrm because detection can sometimes fail
+EndSection
 
 Based on https://cgit.freedesktop.org/xorg/driver/xf86-video-armsoc, https://github.com/xobs/xserver-xorg-video-armada and https://github.com/mxOBS/deb-pkg_xserver-xorg-video-imx-viv

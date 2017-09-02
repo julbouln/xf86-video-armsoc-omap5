@@ -43,9 +43,9 @@
 /* Apparently not used by X server */
 #define ARMSOC_VERSION		1000
 /* Name used to prefix messages */
-#define ARMSOC_NAME			"ARMSOC"
+#define ARMSOC_NAME			"OMAP5"
 /* Driver name as used in config file */
-#define ARMSOC_DRIVER_NAME	"armsoc"
+#define ARMSOC_DRIVER_NAME	"omap5"
 
 #define ARMSOC_SUPPORT_GAMMA 0
 

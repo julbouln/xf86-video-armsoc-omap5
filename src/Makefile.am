@@ -36,10 +36,10 @@ ERROR_CFLAGS = -Wall -Wdeclaration-after-statement -Wvla \
 	-Waddress -Waggregate-return -Wno-multichar -Wnested-externs
  
 AM_CFLAGS = @XORG_CFLAGS@ $(ERROR_CFLAGS)
-armsoc_drv_la_LTLIBRARIES = armsoc_drv.la
-armsoc_drv_la_LDFLAGS = -module -avoid-version -no-undefined
-armsoc_drv_la_LIBADD = @XORG_LIBS@
-armsoc_drv_ladir = @moduledir@/drivers
+omap5_drv_la_LTLIBRARIES = omap5_drv.la
+omap5_drv_la_LDFLAGS = -module -avoid-version -no-undefined
+omap5_drv_la_LIBADD = @XORG_LIBS@
+omap5_drv_ladir = @moduledir@/drivers
 DRMMODE_SRCS = drmmode_exynos/drmmode_exynos.c \
 	drmmode_pl111/drmmode_pl111.c \
 	drmmode_kirin/drmmode_kirin.c \
@@ -47,7 +47,7 @@ DRMMODE_SRCS = drmmode_exynos/drmmode_exynos.c \
 	drmmode_omap/drmmode_omap.c
 
 
-armsoc_drv_la_SOURCES = \
+omap5_drv_la_SOURCES = \
          drmmode_display.c \
          armsoc_exa.c \
          armsoc_exa_null.c \

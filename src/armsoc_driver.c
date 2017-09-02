@@ -97,7 +97,7 @@ _X_EXPORT DriverRec ARMSOC = {
 };
 
 /** Supported "chipsets." */
-#define ARMSOC_CHIPSET_NAME "Mali"
+#define ARMSOC_CHIPSET_NAME "OMAP"
 
 /** Supported options, as enum values. */
 enum {
@@ -502,7 +502,7 @@ static XF86ModuleVersionInfo ARMSOCVersRec = {
 };
 
 /** Let the XFree86 code know about the VersRec and Setup() function. */
-_X_EXPORT XF86ModuleData armsocModuleData = { &ARMSOCVersRec, ARMSOCSetup, NULL };
+_X_EXPORT XF86ModuleData omap5ModuleData = { &ARMSOCVersRec, ARMSOCSetup, NULL };
 
 
 /**
@@ -547,7 +547,7 @@ ARMSOCAvailableOptions(int chipid, int busid)
 static void
 ARMSOCIdentify(int flags)
 {
-	xf86Msg(X_INFO, "%s: Driver for ARM Mali compatible chipsets\n", ARMSOC_NAME);
+	xf86Msg(X_INFO, "%s: Driver for ARM TI OMAP5 compatible chipsets\n", ARMSOC_NAME);
 }
 
 /**

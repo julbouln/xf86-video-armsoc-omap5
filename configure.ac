@@ -23,10 +23,10 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.60)
-AC_INIT([xf86-video-armsoc],
+AC_INIT([xf86-video-armsoc-omap5],
         [1.4.1],
         [],
-        [xf86-video-armsoc])
+        [xf86-video-armsoc-omap5])
 AC_CONFIG_SRCDIR([Makefile.am])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR(.)
@@ -84,7 +84,7 @@ AM_CONDITIONAL(HAVE_XEXTPROTO_71, [ test "$HAVE_XEXTPROTO_71" = "yes"])
 AC_HEADER_STDC
 
 
-DRIVER_NAME=armsoc
+DRIVER_NAME=omap5
 AC_SUBST([DRIVER_NAME])
 AC_SUBST([moduledir])
 
