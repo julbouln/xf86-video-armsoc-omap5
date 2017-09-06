@@ -10,10 +10,16 @@
 #include "state_2d.xml.h"
 #include "cmdstream.xml.h"
 
+
+#define VIV2D_STREAM_SIZE 4096
 #define VIV2D_MAX_RECTS 256
+#define VIV2D_MAX_TMP_PIX 1024
+#define VIV2D_PITCH_ALIGN 32
+
+#define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
 #define VIV2D_DBG_MSG(fmt, ...)
-/*#define VIV2D_DBG_MSG(fmt, ...) \
+/*#define VIV2D_DBG_MSG(fmt, ...)		\
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
 */
@@ -134,6 +140,9 @@ typedef struct _Viv2DRec {
 	struct etna_bo *bo;
 	int width;
 	int height;
+
+	Viv2DPixmapPrivRec tmp_pix[VIV2D_MAX_TMP_PIX];
+	int tmp_pix_cnt;
 
 } Viv2DRec, *Viv2DPtr;
 

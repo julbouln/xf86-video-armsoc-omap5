@@ -72,6 +72,51 @@ static inline void _Viv2DOpInit(Viv2DOp *op) {
 	op->msk = NULL;
 	op->fg = 0;
 	op->mask = 0;
+//	op->tmp_pix_cnt = 0;
+}
+
+static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height) {
+	Viv2DPixmapPrivPtr tmp;
+	int pitch;
+	
+	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
+	pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+	tmp->width = width;
+	tmp->height = height;
+	tmp->pitch = pitch;
+//	VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix %d",v2d->tmp_pix_cnt);
+	v2d->tmp_pix_cnt++;
+
+	return tmp;
+}
+
+
+static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
+	if (v2d->tmp_pix_cnt > 0) {
+		do {
+			Viv2DPixmapPrivPtr tmp;
+			v2d->tmp_pix_cnt--;
+//			VIV2D_INFO_MSG("_Viv2OpClearTmpPix %d",v2d->tmp_pix_cnt);
+			tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
+			etna_bo_del(tmp->bo);
+		} while (v2d->tmp_pix_cnt);
+	}
+}
+
+
+static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
+	VIV2D_DBG_MSG("_Viv2DStreamCommit %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
+	if(async) {
+		etna_cmd_stream_flush(v2d->stream);
+		etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), 0);
+	}
+	else {
+		etna_cmd_stream_flush(v2d->stream);
+		etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), 10);
+	}
+//		_Viv2OpClearTmpPix(v2d);
+
 
 }
 
@@ -79,17 +124,10 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 {
 	if (etna_cmd_stream_avail(v2d->stream) < n) {
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
-		etna_cmd_stream_flush(v2d->stream);
-//		etna_cmd_stream_finish(stream);
+		_Viv2DStreamCommit(v2d, TRUE);
 	}
 }
 
-static inline void _Viv2DStreamCommit(Viv2DPtr v2d) {
-	VIV2D_DBG_MSG("_Viv2DStreamCommit %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
-	etna_cmd_stream_flush(v2d->stream);
-//	etna_cmd_stream_finish(v2d->stream);
-
-}
 
 static inline uint32_t Viv2DSrcConfig(Viv2DFormat *format) {
 	uint32_t src_cfg = VIVS_DE_SRC_CONFIG_SOURCE_FORMAT(format->fmt) |
