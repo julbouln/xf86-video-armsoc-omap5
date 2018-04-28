@@ -4,6 +4,19 @@ Features:
 - EXA and Xv GC320 2D acceleration with etnaviv
 - DRI2 & DRI3
 
+This driver only use GC320 2D capabilities to provide X11 acceleration, it does not give any 3D acceleration.
+For 3D acceleration, you could use https://github.com/TexasInstruments/dri3wsegl which is a DRI3 plugin for PVR SGX 544MP 3D chip available in AM57x. You just need to install SGX drivers and dri3wsegl as documented in the repository. Once done, just restart the X server to activate acceleration in omap5 X11. You can then check if the driver is activated using eglinfo:
+$ eglinfo
+eglGetConfigs():
+======================================================================
+
+**********************************
+EGL config number: 0
+EGL vendor string: Imagination Technologies
+EGL version string: 1.4 build 1.14@3699939 (MAIN)
+EGL extensions: EGL_IMG_client_api_ogl EGL_KHR_image EGL_KHR_image_base EGL_KHR_gl_texture_2D_image EGL_KHR_gl_texture_cubemap_image EGL_KHR_gl_renderbuffer_image EGL_KHR_vg_parent_image EGL_IMG_cl_image EGL_KHR_fence_sync EGL_IMG_context_priority EGL_IMG_hibernate_process EGL_IMG_image_plane_attribs EGL_KHR_surfaceless_context EGL_KHR_wait_sync EGL_KHR_create_context EGL_WL_bind_wayland_display EGL_EXT_image_dma_buf_import
+EGL client APIs are: OpenGL_ES
+
 Install:
 ./autogen.sh
 ./configure --prefix=/usr
