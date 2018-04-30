@@ -54,7 +54,7 @@
 #define VIV2D_SOLID 1
 #define VIV2D_COPY 1
 #define VIV2D_COMPOSITE 1
-#define VIV2D_UPLOAD_TO_SCREEN 1 // NOTE can't see any improvement with that
+//#define VIV2D_UPLOAD_TO_SCREEN 1 // NOTE can't see any improvement with that
 
 #define VIV2D_MASK_SUPPORT 1 // support mask
 #define VIV2D_SOLID_PICTURE 1 // support solid clear picture
@@ -1691,7 +1691,6 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 	if (v2d->op.has_mask) {
 		VIV2D_DBG_MSG("Viv2DDoneComposite with msk dst:%p %d", pDst, v2d->stream->offset);
 		// already done masked operations
-//		_Viv2DStreamCommit(v2d);
 	} else {
 		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
@@ -1699,8 +1698,8 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
 			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
-			_Viv2DStreamCommit(v2d, FALSE); // why this is needed ?
 		}
+		_Viv2DStreamCommit(v2d, FALSE); // why this is needed ?
 	}
 
 	_Viv2OpClearTmpPix(v2d);
