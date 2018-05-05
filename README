@@ -4,13 +4,14 @@ Features:
 - EXA and Xv GC320 2D acceleration with etnaviv
 - DRI2 & DRI3
 
+Kernel version note for etnaviv driver:
+- 4.4x is not tested anymore
+- There is a bug in etnaviv driver in 4.9x, missing mutex make kernel to hang : https://github.com/torvalds/linux/blob/v4.9/drivers/gpu/drm/etnaviv/etnaviv_gem.c#L557
+- It seems this is fixed in 4.14x (untested): https://github.com/torvalds/linux/blob/v4.14/drivers/gpu/drm/etnaviv/etnaviv_gem.c#L561
+
 This driver only use GC320 2D capabilities to provide X11 acceleration, it does not give any 3D acceleration.
 For 3D acceleration, you could use https://github.com/TexasInstruments/dri3wsegl which is a DRI3 plugin for PVR SGX 544MP 3D chip available in AM57x. You just need to install SGX drivers and dri3wsegl as documented in the repository. Once done, just restart the X server to activate acceleration in omap5 X11. You can then check if the driver is activated using eglinfo:
 $ eglinfo
-eglGetConfigs():
-======================================================================
-
-**********************************
 EGL config number: 0
 EGL vendor string: Imagination Technologies
 EGL version string: 1.4 build 1.14@3699939 (MAIN)
