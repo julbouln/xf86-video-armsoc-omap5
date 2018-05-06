@@ -65,9 +65,10 @@
 #define VIV2D_SUPPORT_A8_SRC 1
 #define VIV2D_SUPPORT_A8_MASK 1
 
-#define VIV2D_SUPPORT_A8_DST 1
+//#define VIV2D_SUPPORT_A8_DST 1
 
-#define VIV2D_MIN_SIZE 4096
+#define VIV2D_MIN_SIZE 8192
+//#define VIV2D_MIN_SIZE 0
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 
@@ -1937,6 +1938,9 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	Viv2DPixmapPrivRec tmp, tmp_dest;
 	Bool tmp_bitblt = TRUE;
 	int reserve = 0;
+
+	if(!src->bo || !dst->bo)
+		return FALSE;
 
 	int s_w = pSrcPix->drawable.width;
 	int s_h = pSrcPix->drawable.height;

@@ -201,7 +201,7 @@ setupplane(ScreenPtr pScreen, PixmapPtr pSrcPix, int width, int height,
 	}
 
 	if (!pSrcPix) {
-		pSrcPix = pScreen->CreatePixmap(pScreen, width, height, depth, 0);
+		pSrcPix = pScreen->CreatePixmap(pScreen, width, height, depth, CREATE_PIXMAP_USAGE_BACKING_PIXMAP);
 	}
 
 	bo = ARMSOCPixmapBo(pSrcPix);

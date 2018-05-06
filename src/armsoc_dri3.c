@@ -90,7 +90,7 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 	PixmapPtr pixmap;
 	struct ARMSOCPixmapPrivRec *priv;
 
-	pixmap = pScreen->CreatePixmap(pScreen, width, height, depth, 0);
+	pixmap = pScreen->CreatePixmap(pScreen, width, height, depth, CREATE_PIXMAP_USAGE_BACKING_PIXMAP);
 	if (pixmap == NullPixmap) {
 		ERROR_MSG("ARMSOCDRI3Open cannot create pixmap");
 		return pixmap;

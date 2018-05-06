@@ -34,6 +34,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
+//#define ARMSOC_BO_MIN_SIZE 0
 
 Bool
 is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size)
@@ -43,7 +45,7 @@ is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size)
 	 * pixmaps (where we never expect DRI2 CreateBuffer to be called), we
 	 * just malloc them, which turns out to be much faster.
 	 */
-	return size > (256 * 1024) ||
+	return size > ARMSOC_BO_MIN_SIZE ||
 	       priv->usage_hint == ARMSOC_CREATE_PIXMAP_SCANOUT ||
 	       priv->usage_hint == CREATE_PIXMAP_USAGE_BACKING_PIXMAP;
 }
@@ -110,7 +112,7 @@ CreateNoAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int wid
 		priv->unaccel_pitch = pitch;
 		posix_memalign(&priv->unaccel, PAGE_SIZE, datasize);
 		*/
-		int pitch = 0;
+
 		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
 //		priv->unaccel_size = pitch * height;
 //		priv->unaccel_pitch = pitch;
