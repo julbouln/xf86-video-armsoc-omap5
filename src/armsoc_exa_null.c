@@ -48,6 +48,23 @@ struct ARMSOCNullEXARec {
 	/* add any other driver private data here.. */
 };
 
+
+
+static void FreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
+	free(buf->buf);
+	buf->buf = NULL;
+	buf->pitch = 0;
+	buf->size = 0;
+}
+
+static void AllocBuf(struct ARMSOCEXARec *exa, int width, int height, int bpp, struct ARMSOCEXABuf *buf) {
+	int pitch = ((width * bpp + FB_MASK) >> FB_SHIFT) * sizeof(FbBits);
+	size_t size = pitch * height;
+	buf->buf = malloc(size);
+	buf->pitch = pitch;
+	buf->size = size;
+}
+
 static Bool
 PrepareSolidFail(PixmapPtr pPixmap, int alu, Pixel planemask, Pixel fill_colour)
 {
@@ -56,22 +73,22 @@ PrepareSolidFail(PixmapPtr pPixmap, int alu, Pixel planemask, Pixel fill_colour)
 
 static Bool
 PrepareCopyFail(PixmapPtr pSrc, PixmapPtr pDst, int xdir, int ydir,
-		int alu, Pixel planemask)
+                int alu, Pixel planemask)
 {
 	return FALSE;
 }
 
 static Bool
 CheckCompositeFail(int op, PicturePtr pSrcPicture, PicturePtr pMaskPicture,
-		PicturePtr pDstPicture)
+                   PicturePtr pDstPicture)
 {
 	return FALSE;
 }
 
 static Bool
 PrepareCompositeFail(int op, PicturePtr pSrcPicture, PicturePtr pMaskPicture,
-		PicturePtr pDstPicture, PixmapPtr pSrc,
-		PixmapPtr pMask, PixmapPtr pDst)
+                     PicturePtr pDstPicture, PixmapPtr pSrc,
+                     PixmapPtr pMask, PixmapPtr pDst)
 {
 	return FALSE;
 }
@@ -131,7 +148,7 @@ InitNullEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	exa->pixmapOffsetAlign = 0;
 	exa->pixmapPitchAlign = 32;
 	exa->flags = EXA_OFFSCREEN_PIXMAPS |
-			EXA_HANDLES_PIXMAPS | EXA_SUPPORTS_PREPARE_AUX;
+	             EXA_HANDLES_PIXMAPS | EXA_SUPPORTS_PREPARE_AUX;
 	exa->maxX = 4096;
 	exa->maxY = 4096;
 
@@ -155,6 +172,9 @@ InitNullEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		ERROR_MSG("exaDriverInit failed");
 		goto free_exa;
 	}
+
+	armsoc_exa->AllocBuf = AllocBuf;
+	armsoc_exa->FreeBuf = FreeBuf;
 
 	armsoc_exa->CloseScreen = CloseScreen;
 	armsoc_exa->FreeScreen = FreeScreen;

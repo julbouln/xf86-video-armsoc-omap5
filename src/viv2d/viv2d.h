@@ -10,7 +10,6 @@
 #include "state_2d.xml.h"
 #include "cmdstream.xml.h"
 
-
 #define VIV2D_STREAM_SIZE 4096
 #define VIV2D_MAX_RECTS 256
 #define VIV2D_MAX_TMP_PIX 1024

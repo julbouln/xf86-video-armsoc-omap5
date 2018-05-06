@@ -75,23 +75,6 @@ static inline void _Viv2DOpInit(Viv2DOp *op) {
 //	op->tmp_pix_cnt = 0;
 }
 
-static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height) {
-	Viv2DPixmapPrivPtr tmp;
-	int pitch;
-
-	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
-	pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
-	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
-	tmp->width = width;
-	tmp->height = height;
-	tmp->pitch = pitch;
-//	VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix %d",v2d->tmp_pix_cnt);
-	v2d->tmp_pix_cnt++;
-
-	return tmp;
-}
-
-
 static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 	if (v2d->tmp_pix_cnt > 0) {
 		do {
@@ -126,6 +109,25 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
 		_Viv2DStreamCommit(v2d, TRUE);
 	}
+}
+
+static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height) {
+	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
+		_Viv2DStreamCommit(v2d, FALSE);
+	}
+	Viv2DPixmapPrivPtr tmp;
+	int pitch;
+
+	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
+	pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+	tmp->width = width;
+	tmp->height = height;
+	tmp->pitch = pitch;
+//	VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix %d", v2d->tmp_pix_cnt);
+	v2d->tmp_pix_cnt++;
+
+	return tmp;
 }
 
 

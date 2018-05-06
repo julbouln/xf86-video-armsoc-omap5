@@ -35,6 +35,20 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+
+Bool
+is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size)
+{
+	/* For pixmaps that are scanout or backing for windows, we
+	 * "accelerate" them by allocating them via GEM. For all other
+	 * pixmaps (where we never expect DRI2 CreateBuffer to be called), we
+	 * just malloc them, which turns out to be much faster.
+	 */
+	return size > (256 * 1024) ||
+	       priv->usage_hint == ARMSOC_CREATE_PIXMAP_SCANOUT ||
+	       priv->usage_hint == CREATE_PIXMAP_USAGE_BACKING_PIXMAP;
+}
+
 /* keep this here, instead of static-inline so submodule doesn't
  * need to know layout of ARMSOCRec.
  */
@@ -75,71 +89,138 @@ ARMSOCPixmapExchange(PixmapPtr a, PixmapPtr b)
 	}
 }
 
-_X_EXPORT void *
-ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
-		int depth, int usage_hint, int bitsPerPixel,
-		int *new_fb_pitch)
+#define PAGE_SHIFT      12
+#define PAGE_SIZE       (1UL << PAGE_SHIFT)
+#define PAGE_MASK       (~(PAGE_SIZE-1))
+#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
+
+#define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
+
+static void *
+CreateNoAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
+                    int depth, int bitsPerPixel,
+                    int *new_fb_pitch)
 {
-	struct ARMSOCPixmapPrivRec *priv = calloc(1, sizeof(*priv));
+	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+
+	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
+		/*
+		int pitch = ALIGN(((width * bitsPerPixel + FB_MASK) >> FB_SHIFT) * sizeof(FbBits),32);
+		size_t datasize = PAGE_ALIGN(pitch * height);
+		priv->unaccel_pitch = pitch;
+		posix_memalign(&priv->unaccel, PAGE_SIZE, datasize);
+		*/
+		int pitch = 0;
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
+//		priv->unaccel_size = pitch * height;
+//		priv->unaccel_pitch = pitch;
+		/*
+				int pitch = ((width * bitsPerPixel + FB_MASK) >> FB_SHIFT) * sizeof(FbBits);
+				size_t datasize = pitch * height;
+				priv->unaccel_pitch = pitch;
+				priv->unaccel = malloc(datasize);
+		*/
+		if (!priv->buf.buf) {
+			ERROR_MSG("failed to allocate %dx%d mem", width, height);
+			free(priv);
+			return NULL;
+		}
+//		priv->unaccel_size = datasize;
+//		INFO_MSG("CreateNoAccelPixmap armsocpix:%x page_size:%d size:%d pitch:%d pitch_align:%d", priv, PAGE_SIZE, priv->unaccel_size, pitch, pitch % 32);
+		*new_fb_pitch = priv->buf.pitch;
+	}
+
+	return priv;
+}
+
+static void *
+CreateAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
+                  int depth, int bitsPerPixel,
+                  int *new_fb_pitch)
+{
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	enum armsoc_buf_type buf_type = ARMSOC_BO_NON_SCANOUT;
 
-	if (!priv)
-		return NULL;
-
-	if (usage_hint & ARMSOC_CREATE_PIXMAP_SCANOUT)
+	if (priv->usage_hint == ARMSOC_CREATE_PIXMAP_SCANOUT)
 		buf_type = ARMSOC_BO_SCANOUT;
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
 		/* Pixmap creates and takes a ref on its bo */
 		priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
-				width,
-				height,
-				depth,
-				bitsPerPixel, buf_type);
+		                                  width,
+		                                  height,
+		                                  depth,
+		                                  bitsPerPixel, buf_type);
 
 		if ((!priv->bo) && ARMSOC_BO_SCANOUT == buf_type) {
 			/* Tried to create a scanout but failed. Attempt to
 			 * fall back to non-scanout instead.
 			 */
 			WARNING_MSG(
-					"Scanout buffer allocation failed, falling back to non-scanout");
+			    "Scanout buffer allocation failed, falling back to non-scanout");
 			buf_type = ARMSOC_BO_NON_SCANOUT;
-			/* Pixmap creates and takes a ref on its bo */
 			priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
-					width,
-					height,
-					depth,
-					bitsPerPixel, buf_type);
+			                                  width,
+			                                  height,
+			                                  depth,
+			                                  bitsPerPixel, buf_type);
 		}
 
 		if (!priv->bo) {
 			ERROR_MSG("failed to allocate %dx%d bo, buf_type = %d",
-					width, height, buf_type);
+			          width, height, buf_type);
 			free(priv);
 			return NULL;
 		}
 		*new_fb_pitch = armsoc_bo_pitch(priv->bo);
 	}
 
-	/* The usage_hint field of the Pixmap passed to ModifyPixmapHeader is
-	 * not set to the usage_hint parameter passed to CreatePixmap.
-	 * It does appear to be set here so we stash it in the private
-	 * structure. However as we do not fully understand the uses of this
-	 * parameter, beware of any unexpected values!
-	 */
+	return priv;
+}
+
+_X_EXPORT void *
+ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
+                    int depth, int usage_hint, int bitsPerPixel,
+                    int *new_fb_pitch)
+{
+	struct ARMSOCPixmapPrivRec *priv = calloc(1, sizeof(*priv));
+	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+
+	priv->buf.buf = NULL;
+	priv->buf.priv = NULL;
+	priv->buf.size = 0;
+	priv->buf.pitch = 0;
+
+//   INFO_MSG("ARMSOCCreatePixmap2 %x", priv);
+
+	if (!priv)
+		return NULL;
+
+	if (!pARMSOC->created_scanout_pixmap) {
+		usage_hint = ARMSOC_CREATE_PIXMAP_SCANOUT;
+		pARMSOC->created_scanout_pixmap = TRUE;
+	}
 	priv->usage_hint = usage_hint;
 
-	return priv;
+	if (is_accel_pixmap(priv, width * height * (bitsPerPixel / 8)))
+		return CreateAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+	else
+		return CreateNoAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
 }
 
 _X_EXPORT void
 ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 {
+	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *priv = driverPriv;
 
 	assert(!priv->ext_access_cnt);
+
+//    INFO_MSG("ARMSOCDestroyPixmap %x", priv);
 
 	/* If ModifyPixmapHeader failed, it's possible we don't have a bo
 	 * backing this pixmap. */
@@ -149,20 +230,114 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 		armsoc_bo_unreference(priv->bo);
 	}
 
+	if (priv->buf.buf) {
+		pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
+//		priv->unaccel = NULL;
+	}
+//		free(priv->unaccel);
+
 	free(priv);
 }
 
-_X_EXPORT Bool
-ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
-		int depth, int bitsPerPixel, int devKind,
-		pointer pPixData)
+
+static Bool
+ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
+                          int depth, int bitsPerPixel, int devKind,
+                          pointer pPixData)
 {
-	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	size_t datasize;
+
+	/* Only modify specified fields, keeping all others intact. */
+	if (pPixData)
+		pPixmap->devPrivate.ptr = pPixData;
+
+	if (devKind > 0)
+		pPixmap->devKind = devKind;
+
+	/*
+	 * Someone is messing with the memory allocation. Let's step out of
+	 * the picture.
+	 */
+	if (pPixData && pPixData != priv->buf.buf) {
+		if (priv->buf.buf) {
+			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
+		}
+
+		priv->buf.buf = NULL;
+		priv->buf.size = 0;
+		priv->buf.pitch = 0;
+
+		/* Returning FALSE calls miModifyPixmapHeader */
+		return FALSE;
+	}
+
+	if (depth > 0)
+		pPixmap->drawable.depth = depth;
+
+	if (bitsPerPixel > 0)
+		pPixmap->drawable.bitsPerPixel = bitsPerPixel;
+
+	if (width > 0)
+		pPixmap->drawable.width = width;
+
+	if (height > 0)
+		pPixmap->drawable.height = height;
+
+	/*
+	 * X will sometimes create an empty pixmap (width/height == 0) and then
+	 * use ModifyPixmapHeader to point it at PixData. We'll hit this path
+	 * during the CreatePixmap call. Just return true and skip the allocate
+	 * in this case.
+	 */
+	if (!pPixmap->drawable.width || !pPixmap->drawable.height)
+		return TRUE;
+
+	datasize = (devKind * height);
+//	datasize = (devKind * height);
+	if (!priv->buf.buf || priv->buf.size != datasize) {
+
+		/* re-allocate buffer! */
+		if (priv->buf.buf) {
+			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
+//			priv->unaccel = NULL;
+
+//			free(priv->unaccel);
+		}
+
+//		int pitch = 0;
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
+//		priv->unaccel = malloc(datasize);
+//		posix_memalign(&priv->unaccel, PAGE_SIZE, datasize);
+
+		if (!priv->buf.buf) {
+			ERROR_MSG("failed to allocate %d bytes mem",
+			          datasize);
+			priv->buf.size = 0;
+//			priv->unaccel_size = 0;
+			return FALSE;
+		}
+//		priv->unaccel_size = datasize;
+//		priv->unaccel_pitch = devKind;
+//		INFO_MSG("ModifyUnAccelPixmapHeader armsocpix:%x page_size:%d size:%d pitch:%d pitch_align:%d", priv, PAGE_SIZE, priv->unaccel_size, devKind, devKind % 32);
+
+	}
+
+	return TRUE;
+}
+
+
+static Bool
+ModifyAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
+                        int depth, int bitsPerPixel, int devKind,
+                        pointer pPixData)
+{
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	enum armsoc_buf_type buf_type = ARMSOC_BO_NON_SCANOUT;
 
-    /* Only modify specified fields, keeping all others intact. */
+	/* Only modify specified fields, keeping all others intact. */
 	if (pPixData)
 		pPixmap->devPrivate.ptr = pPixData;
 
@@ -201,7 +376,7 @@ ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 		}
 	}
 
-	if (priv->usage_hint & ARMSOC_CREATE_PIXMAP_SCANOUT)
+	if (priv->usage_hint == ARMSOC_CREATE_PIXMAP_SCANOUT)
 		buf_type = ARMSOC_BO_SCANOUT;
 
 	if (depth > 0)
@@ -227,42 +402,55 @@ ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 
 	assert(priv->bo);
 	if (armsoc_bo_width(priv->bo) != pPixmap->drawable.width ||
-	    armsoc_bo_height(priv->bo) != pPixmap->drawable.height ||
-	    armsoc_bo_bpp(priv->bo) != pPixmap->drawable.bitsPerPixel) {
+	        armsoc_bo_height(priv->bo) != pPixmap->drawable.height ||
+	        armsoc_bo_bpp(priv->bo) != pPixmap->drawable.bitsPerPixel) {
 		/* pixmap drops ref on its old bo */
 		armsoc_bo_unreference(priv->bo);
 		/* pixmap creates new bo and takes ref on it */
 		priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
-				pPixmap->drawable.width,
-				pPixmap->drawable.height,
-				pPixmap->drawable.depth,
-				pPixmap->drawable.bitsPerPixel, buf_type);
+		                                  pPixmap->drawable.width,
+		                                  pPixmap->drawable.height,
+		                                  pPixmap->drawable.depth,
+		                                  pPixmap->drawable.bitsPerPixel, buf_type);
 
 		if ((!priv->bo) && ARMSOC_BO_SCANOUT == buf_type) {
 			/* Tried to create a scanout but failed. Attempt to
 			 * fall back to non-scanout instead.
 			 */
 			WARNING_MSG(
-					"Scanout buffer allocation failed, falling back to non-scanout");
+			    "Scanout buffer allocation failed, falling back to non-scanout");
 			buf_type = ARMSOC_BO_NON_SCANOUT;
+			/* Pixmap creates and takes a ref on its bo */
 			/* pixmap creates new bo and takes ref on it */
 			priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
-					pPixmap->drawable.width,
-					pPixmap->drawable.height,
-					pPixmap->drawable.depth,
-					pPixmap->drawable.bitsPerPixel,
-					buf_type);
+			                                  pPixmap->drawable.width,
+			                                  pPixmap->drawable.height,
+			                                  pPixmap->drawable.depth,
+			                                  pPixmap->drawable.bitsPerPixel,
+			                                  buf_type);
 		}
 		if (!priv->bo) {
 			ERROR_MSG("failed to allocate %dx%d bo, buf_type = %d",
-					pPixmap->drawable.width,
-					pPixmap->drawable.height, buf_type);
+			          pPixmap->drawable.width,
+			          pPixmap->drawable.height, buf_type);
 			return FALSE;
 		}
 		pPixmap->devKind = armsoc_bo_pitch(priv->bo);
 	}
 
 	return TRUE;
+}
+
+_X_EXPORT Bool
+ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
+                         int depth, int bitsPerPixel, int devKind,
+                         pointer pPixData)
+{
+	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+	if (is_accel_pixmap(priv, width * height * (bitsPerPixel / 8)))
+		return ModifyAccelPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
+	else
+		return ModifyUnAccelPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
 }
 
 /**
@@ -280,60 +468,59 @@ static inline enum armsoc_gem_op idx2op(int index)
 {
 	switch (index) {
 	case EXA_PREPARE_SRC:
-	case EXA_PREPARE_MASK:
-	case EXA_PREPARE_AUX_SRC:
-	case EXA_PREPARE_AUX_MASK:
-		return ARMSOC_GEM_READ;
-	case EXA_PREPARE_AUX_DEST:
-	case EXA_PREPARE_DEST:
-	default:
-		return ARMSOC_GEM_READ_WRITE;
+			case EXA_PREPARE_MASK:
+				case EXA_PREPARE_AUX_SRC:
+					case EXA_PREPARE_AUX_MASK:
+							return ARMSOC_GEM_READ;
+		case EXA_PREPARE_AUX_DEST:
+		case EXA_PREPARE_DEST:
+		default:
+			return ARMSOC_GEM_READ_WRITE;
+		}
 	}
-}
 
-/**
- * PrepareAccess() is called before CPU access to an offscreen pixmap.
- *
- * @param pPix the pixmap being accessed
- * @param index the index of the pixmap being accessed.
- *
- * PrepareAccess() will be called before CPU access to an offscreen pixmap.
- * This can be used to set up hardware surfaces for byteswapping or
- * untiling, or to adjust the pixmap's devPrivate.ptr for the purpose of
- * making CPU access use a different aperture.
- *
- * The index is one of #EXA_PREPARE_DEST, #EXA_PREPARE_SRC,
- * #EXA_PREPARE_MASK, #EXA_PREPARE_AUX_DEST, #EXA_PREPARE_AUX_SRC, or
- * #EXA_PREPARE_AUX_MASK. Since only up to #EXA_NUM_PREPARE_INDICES pixmaps
- * will have PrepareAccess() called on them per operation, drivers can have
- * a small, statically-allocated space to maintain state for PrepareAccess()
- * and FinishAccess() in.  Note that PrepareAccess() is only called once per
- * pixmap and operation, regardless of whether the pixmap is used as a
- * destination and/or source, and the index may not reflect the usage.
- *
- * PrepareAccess() may fail.  An example might be the case of hardware that
- * can set up 1 or 2 surfaces for CPU access, but not 3.  If PrepareAccess()
- * fails, EXA will migrate the pixmap to system memory.
- * DownloadFromScreen() must be implemented and must not fail if a driver
- * wishes to fail in PrepareAccess().  PrepareAccess() must not fail when
- * pPix is the visible screen, because the visible screen can not be
- * migrated.
- *
- * @return TRUE if PrepareAccess() successfully prepared the pixmap for CPU
- * drawing.
- * @return FALSE if PrepareAccess() is unsuccessful and EXA should use
- * DownloadFromScreen() to migate the pixmap out.
- */
-_X_EXPORT Bool
-ARMSOCPrepareAccess(PixmapPtr pPixmap, int index)
+	/**
+	 * PrepareAccess() is called before CPU access to an offscreen pixmap.
+	 *
+	 * @param pPix the pixmap being accessed
+	 * @param index the index of the pixmap being accessed.
+	 *
+	 * PrepareAccess() will be called before CPU access to an offscreen pixmap.
+	 * This can be used to set up hardware surfaces for byteswapping or
+	 * untiling, or to adjust the pixmap's devPrivate.ptr for the purpose of
+	 * making CPU access use a different aperture.
+	 *
+	 * The index is one of #EXA_PREPARE_DEST, #EXA_PREPARE_SRC,
+	 * #EXA_PREPARE_MASK, #EXA_PREPARE_AUX_DEST, #EXA_PREPARE_AUX_SRC, or
+	 * #EXA_PREPARE_AUX_MASK. Since only up to #EXA_NUM_PREPARE_INDICES pixmaps
+	 * will have PrepareAccess() called on them per operation, drivers can have
+	 * a small, statically-allocated space to maintain state for PrepareAccess()
+	 * and FinishAccess() in.  Note that PrepareAccess() is only called once per
+	 * pixmap and operation, regardless of whether the pixmap is used as a
+	 * destination and/or source, and the index may not reflect the usage.
+	 *
+	 * PrepareAccess() may fail.  An example might be the case of hardware that
+	 * can set up 1 or 2 surfaces for CPU access, but not 3.  If PrepareAccess()
+	 * fails, EXA will migrate the pixmap to system memory.
+	 * DownloadFromScreen() must be implemented and must not fail if a driver
+	 * wishes to fail in PrepareAccess().  PrepareAccess() must not fail when
+	 * pPix is the visible screen, because the visible screen can not be
+	 * migrated.
+	 *
+	 * @return TRUE if PrepareAccess() successfully prepared the pixmap for CPU
+	 * drawing.
+	 * @return FALSE if PrepareAccess() is unsuccessful and EXA should use
+	 * DownloadFromScreen() to migate the pixmap out.
+	 */
+	_X_EXPORT Bool
+	ARMSOCPrepareAccess(PixmapPtr pPixmap, int index)
 {
-	ScreenPtr pScreen = pPixmap->drawable.pScreen;
-	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
-	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	uint32_t dmabuf_name = 0;
-	_lock_item_s item;
-	int ret;
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+
+	if (!is_accel_pixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8))) {
+		pPixmap->devPrivate.ptr = priv->buf.buf;
+		return TRUE;
+	}
 
 	pPixmap->devPrivate.ptr = armsoc_bo_map(priv->bo);
 	if (!pPixmap->devPrivate.ptr) {
@@ -347,45 +534,19 @@ ARMSOCPrepareAccess(PixmapPtr pPixmap, int index)
 	if (priv->ext_access_cnt && !armsoc_bo_has_dmabuf(priv->bo)) {
 		if (armsoc_bo_set_dmabuf(priv->bo)) {
 			xf86DrvMsg(-1, X_ERROR,
-				"%s: Unable to get dma_buf fd for bo, to enable synchronised CPU access.\n",
-				__func__);
+			           "%s: Unable to get dma_buf fd for bo, to enable synchronised CPU access.\n",
+			           __func__);
 			return FALSE;
 		}
 	}
 
-	if (-1 != pARMSOC->lockFD) {
-		ret = armsoc_bo_get_name(priv->bo, &dmabuf_name);
-
-		if (ret) {
-			ERROR_MSG("could not get buffer name");
-			return FALSE;
-		}
-
-		item.secure_id = dmabuf_name;
-		item.usage = _LOCK_ACCESS_CPU_WRITE;
-
-		if (ioctl(pARMSOC->lockFD,  LOCK_IOCTL_CREATE, &item) < 0) {
-			ERROR_MSG("Unable to create lock item\n");
-			return FALSE;
-		}
-		if (ioctl(pARMSOC->lockFD, LOCK_IOCTL_PROCESS, &item) < 0) {
-			int max_retries = 5;
-			ERROR_MSG("Unable to process lock item with ID 0x%x - throttling\n", item.secure_id);
-			while ((ioctl(pARMSOC->lockFD, LOCK_IOCTL_PROCESS, &item) < 0) && max_retries) {
-				usleep(2000);
-				max_retries--;
-			}
-			if (max_retries == 0)
-				ERROR_MSG("Warning: Max retries == 0\n");
-		}
-	} else {
-		if (armsoc_bo_cpu_prep(priv->bo, idx2op(index))) {
-			xf86DrvMsg(-1, X_ERROR,
-				"%s: armsoc_bo_cpu_prep failed - unable to synchronise access.\n",
-				__func__);
-			return FALSE;
-		}
+	if (armsoc_bo_cpu_prep(priv->bo, idx2op(index))) {
+		xf86DrvMsg(-1, X_ERROR,
+		           "%s: armsoc_bo_cpu_prep failed - unable to synchronise access.\n",
+		           __func__);
+		return FALSE;
 	}
+
 	return TRUE;
 }
 
@@ -402,32 +563,16 @@ ARMSOCPrepareAccess(PixmapPtr pPixmap, int index)
 _X_EXPORT void
 ARMSOCFinishAccess(PixmapPtr pPixmap, int index)
 {
-	ScreenPtr pScreen = pPixmap->drawable.pScreen;
-	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
-	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	if (-1 != pARMSOC->lockFD){
-		uint32_t dmabuf_name = 0;
-		_lock_item_s item;
-		int ret;
 
-		pPixmap->devPrivate.ptr = NULL;
-		ret = armsoc_bo_get_name(priv->bo, &dmabuf_name);
-		if (ret) {
-			ERROR_MSG("could not get buffer name");
-			return ;
-		}
-		item.secure_id = dmabuf_name;
-		item.usage = _LOCK_ACCESS_CPU_WRITE;
-		ioctl(pARMSOC->lockFD, LOCK_IOCTL_RELEASE, &item);
-	}else{
-		/* NOTE: can we use EXA migration module to track which parts of the
-		 * buffer was accessed by sw, and pass that info down to kernel to
-		 * do a more precise cache flush..
-		 */
-		pPixmap->devPrivate.ptr = NULL;
+	pPixmap->devPrivate.ptr = NULL;
+
+	/* NOTE: can we use EXA migration module to track which parts of the
+	 * buffer was accessed by sw, and pass that info down to kernel to
+	 * do a more precise cache flush..
+	 */
+	if (is_accel_pixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8)))
 		armsoc_bo_cpu_fini(priv->bo, idx2op(index));
-	}
 }
 
 /**
@@ -454,7 +599,7 @@ ARMSOCPixmapIsOffscreen(PixmapPtr pPixmap)
 	 * wrap this function.
 	 */
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
-	return priv && priv->bo;
+	return priv && (priv->bo || priv->buf.buf);
 }
 
 void ARMSOCRegisterExternalAccess(PixmapPtr pPixmap)

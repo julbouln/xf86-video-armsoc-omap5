@@ -54,6 +54,7 @@
 #define VIV2D_SOLID 1
 #define VIV2D_COPY 1
 #define VIV2D_COMPOSITE 1
+#define VIV2D_PUT_TEXTURE_IMAGE 1
 //#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1 // does not work
 
@@ -65,12 +66,15 @@
 #define VIV2D_SUPPORT_A8_SRC 1
 #define VIV2D_SUPPORT_A8_MASK 1
 
-//#define VIV2D_SUPPORT_A8_DST 1
+#define VIV2D_SUPPORT_A8_DST 1
+
+#define VIV2D_MIN_SIZE 4096
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 
-#define VIV2D_MIN_HW_HEIGHT 32
-#define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
+//#define VIV2D_MIN_HW_HEIGHT 64
+//#define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
+//#define VIV2D_MIN_HW_SIZE_24BIT (4096)
 
 static Viv2DBlendOp viv2d_blend_op[] = {
 	{PictOpClear,			DE_BLENDMODE_ZERO, 				DE_BLENDMODE_ZERO},
@@ -121,6 +125,44 @@ viv2d_pict_format[] = {
 
 // others utils
 
+
+#if 0
+// requires libdrm etnaviv patch https://patchwork.kernel.org/patch/9912089/
+
+#define PAGE_SHIFT      12
+#define PAGE_SIZE       (1UL << PAGE_SHIFT)
+#define PAGE_MASK       (~(PAGE_SIZE-1))
+#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
+
+static struct etna_bo *etna_bo_from_usermem_prot(Viv2DPtr v2d, void *memory, size_t size) {
+	struct etna_bo *mem = NULL;
+	struct drm_etnaviv_gem_userptr req = {
+		.user_ptr = (uintptr_t)memory,
+		.user_size = PAGE_ALIGN(size),
+		.flags = (ETNA_USERPTR_READ | ETNA_USERPTR_WRITE),
+	};
+	int err;
+
+
+//	if (PAGE_ALIGN((uint32_t)memory) == (uint32_t)memory) {
+
+	err = drmCommandWriteRead(v2d->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
+	                          sizeof(req));
+	if (err) {
+		VIV2D_DBG_MSG("etna_bo_from_usermem_prot fail: %d", err);
+		mem = NULL;
+	}
+	else {
+		VIV2D_DBG_MSG("etna_bo_from_usermem_prot success : %d -> %d", size, PAGE_ALIGN(size));
+		mem = etna_bo_from_handle(v2d->dev, req.handle, PAGE_ALIGN(size));
+	}
+//	} else {
+//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: unaligned memory %p <=> %p", PAGE_ALIGN((uint32_t)memory), (uint32_t)memory);
+//	}
+	return mem;
+}
+#endif
+
 static int VIV2DDetectDevice(const char *name)
 {
 	drmVersionPtr version;
@@ -159,7 +201,7 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 
 		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
-			if (pix->bo) {
+			if (armsocPix->bo && pix->bo) {
 				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
 				etna_bo_del(pix->bo);
 				pix->bo = NULL;
@@ -168,24 +210,39 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 	}
 }
 
-static inline void Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
+static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
 	if (armsocPix) {
 		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
-		if (armsocPix->bo == pARMSOC->scanout) {
-			pix->bo = v2d->bo;
-		} else {
-			int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
-			if (fd) {
-				pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
-				close(fd);
-				VIV2D_DBG_MSG("Viv2DAttachBo attach %p bo:%p", pix, pix->bo);
+		if (armsocPix->bo) {
+			if (armsocPix->bo == pARMSOC->scanout) {
+				pix->bo = v2d->bo;
 			} else {
-				VIV2D_ERR_MSG("Viv2D error: cannot attach bo : %d", fd);
+				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap");
+				int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
+				if (fd) {
+					pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
+					close(fd);
+					VIV2D_DBG_MSG("Viv2DAttachBo attach %p bo:%p", pix, pix->bo);
+				} else {
+					VIV2D_ERR_MSG("Viv2D error: cannot attach bo : %d", fd);
+				}
+			}
+		} else {
+			if (armsocPix->buf.priv) {
+				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from armsoc buf %x %d", armsocPix->buf.buf, armsocPix->buf.size);
+				pix->bo = (struct etna_bo *)armsocPix->buf.priv;
+			} else {
+				VIV2D_DBG_MSG("Viv2DAttachBo: buf too small %x %d", &armsocPix->buf, armsocPix->buf.size);
+				pix->bo = NULL;
 			}
 		}
+		return TRUE;
+	} else {
+		VIV2D_INFO_MSG("Viv2DAttachBo failed: no armsoc pix");
 	}
+	return FALSE;
 }
 
 static inline uint32_t Viv2DScale16(uint32_t val, int bits)
@@ -410,7 +467,7 @@ Viv2DPixmapIsOffscreen(PixmapPtr pPixmap)
 	 * constraints, like buffer size or mapping in GPU MMU, it should
 	 * wrap this function.
 	 */
-	return pix && pix->bo;
+	return pix && (pix->bo || armsocPix->buf.buf);
 }
 
 static void *
@@ -425,6 +482,7 @@ Viv2DCreatePixmap (ScreenPtr pScreen, int width, int height,
 
 	armsocPix->priv = pix;
 	pix->armsocPix = armsocPix;
+	VIV2D_DBG_MSG("Viv2DCreatePixmap pix %p created.", pix);
 	return armsocPix;
 }
 
@@ -445,12 +503,54 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	ARMSOCDestroyPixmap(pScreen, armsocPix);
 }
 
+static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
+	if (buf->size > VIV2D_MIN_SIZE) {
+		struct etna_bo *bo = (struct etna_bo *)buf->priv;
+		etna_bo_del(bo);
+	} else {
+		VIV2D_DBG_MSG("Viv2DFreeBuf: buf too small %x %d", buf, buf->size);
+		free(buf->buf);
+	}
+	buf->priv = NULL;
+	buf->buf = NULL;
+	buf->pitch = 0;
+	buf->size = 0;
+}
+
+static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int bpp, struct ARMSOCEXABuf *buf) {
+	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+	Viv2DRec *v2d = v2d_exa->v2d;
+
+	int pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
+	int size = pitch * height;
+
+	if (size > VIV2D_MIN_SIZE) {
+		struct etna_bo *bo;
+
+//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
+		bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+		if (!bo) {
+//		VIV2D_INFO_MSG("Viv2DAllocBuf CANNOT ALLOCATE BO");
+		}
+		buf->priv = (void *)bo;
+		buf->buf = (void *)etna_bo_map(bo);
+	} else {
+		VIV2D_DBG_MSG("Viv2DAllocBuf: buf too small %x %d", buf, size);
+		buf->priv = NULL;
+		buf->buf = malloc(size);
+	}
+
+	buf->pitch = pitch;
+	buf->size = size;
+}
+
 static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
 
 	Viv2DPixmapPrivPtr pix = armsocPix->priv;
+	VIV2D_DBG_MSG("Viv2DReattach pix %p", pix);
 
 	pix->width = width;
 	pix->height = height;
@@ -472,13 +572,15 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 
 	Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
+	VIV2D_DBG_MSG("Viv2DModifyPixmapHeader pix %p", pix);
+
 	if (ARMSOCModifyPixmapHeader(pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData)) {
-		if (pPixData == armsoc_bo_map(pARMSOC->scanout) && pix->bo != v2d->bo) {
+		if (armsocPix->bo && pPixData == armsoc_bo_map(pARMSOC->scanout) && pix->bo != v2d->bo) {
+			VIV2D_DBG_MSG("Viv2DModifyPixmapHeader pix bo scanout %p", pPixmap);
 			pix->width = armsoc_bo_width(pARMSOC->scanout);
 			pix->height = armsoc_bo_height(pARMSOC->scanout);
 			pix->pitch = armsoc_bo_pitch(pARMSOC->scanout);
 			pix->bo = v2d->bo;
-			VIV2D_DBG_MSG("Viv2DModifyPixmapHeader pix bo scanout %p", pPixmap);
 		} else {
 			if (armsocPix->bo) {
 				if (pix->width != armsoc_bo_width(armsocPix->bo) ||
@@ -494,12 +596,19 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 					pix->height = armsoc_bo_height(armsocPix->bo);
 					pix->pitch = armsoc_bo_pitch(armsocPix->bo);
 					Viv2DDetachBo(pARMSOC, armsocPix);
-					Viv2DAttachBo(pARMSOC, armsocPix);
+					return Viv2DAttachBo(pARMSOC, armsocPix);
 				}
+			} else {
+				VIV2D_DBG_MSG("Viv2DModifyPixmapHeader unaccel pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
+				pix->width = width;
+				pix->height = height;
+				pix->pitch = armsocPix->buf.pitch;//ALIGN(width * ((bitsPerPixel + 7) / 8), VIV2D_PITCH_ALIGN);
+				Viv2DDetachBo(pARMSOC, armsocPix);
+				return Viv2DAttachBo(pARMSOC, armsocPix);
 			}
 		}
 	} else {
-//		VIV2D_DBG_MSG("Viv2DModifyPixmapHeader failed pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
+		VIV2D_DBG_MSG("Viv2DModifyPixmapHeader failed pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
 		Viv2DDetachBo(pARMSOC, armsocPix);
 		return FALSE;
 	}
@@ -539,43 +648,6 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
  * acceleration is supported.
  */
 
-#if 0
-// requires libdrm etnaviv patch https://patchwork.kernel.org/patch/9912089/
-
-#define PAGE_SHIFT      12
-#define PAGE_SIZE       (1UL << PAGE_SHIFT)
-#define PAGE_MASK       (~(PAGE_SIZE-1))
-#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
-
-static struct etna_bo *etna_bo_from_usermem_prot(Viv2DPtr v2d, void *memory, size_t size) {
-	struct etna_bo *mem = NULL;
-	struct drm_etnaviv_gem_userptr req = {
-		.user_ptr = (uintptr_t)memory,
-		.user_size = PAGE_ALIGN(size),
-		.flags = (ETNA_USERPTR_READ | ETNA_USERPTR_WRITE),
-	};
-	int err;
-
-
-//	if(PAGE_ALIGN((uint32_t)memory) == (uint32_t)memory) {
-
-	err = drmCommandWriteRead(v2d->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
-	                          sizeof(req));
-	if (err) {
-		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
-		mem = NULL;
-	}
-	else {
-		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success");
-		mem = etna_bo_from_handle(v2d->dev, req.handle, PAGE_ALIGN(size));
-	}
-//	} else {
-//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: unaligned memory %p <=> %p",PAGE_ALIGN((uint32_t)memory),(uint32_t)memory);
-//	}
-	return mem;
-}
-#endif
-
 #ifdef VIV2D_UPLOAD_TO_SCREEN
 
 static Bool Viv2DUploadToScreen(PixmapPtr pDst,
@@ -587,7 +659,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDst);
 	Viv2DRect rects[1];
 	int height = h;
-	Viv2DPixmapPrivPtr tmp = _Viv2DOpCreateTmpPix(v2d, w, h);
+	Viv2DPixmapPrivPtr tmp;
 	int pitch, size;
 	char *src_buf, *buf;
 
@@ -604,6 +676,8 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported dst format %d/%d %p", pDst->drawable.depth, pDst->drawable.bitsPerPixel, src);
 		return FALSE;
 	}
+
+	tmp = _Viv2DOpCreateTmpPix(v2d, w, h);
 
 	if (!Viv2DSetFormat(pDst->drawable.depth, pDst->drawable.bitsPerPixel, &tmp->format)) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported format %d/%d %p", pDst->drawable.depth, pDst->drawable.bitsPerPixel, src);
@@ -793,6 +867,10 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pPixmap);
 
+	if (!dst->bo) {
+		return FALSE;
+	}
+
 #ifdef VIV2D_SIZE_CONSTRAINTS
 	if (pPixmap->drawable.height < VIV2D_MIN_HW_HEIGHT || pPixmap->drawable.width * pPixmap->drawable.height < VIV2D_MIN_HW_SIZE_24BIT) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareSolid dest drawable is too small %dx%d", pPixmap->drawable.width, pPixmap->drawable.height);
@@ -949,6 +1027,10 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 	Viv2DPixmapPrivPtr src = Viv2DPixmapPrivFromPixmap(pSrcPixmap);
 	Viv2DPixmapPrivPtr dst = Viv2DPixmapPrivFromPixmap(pDstPixmap);
+
+	if (!src->bo || !dst->bo) {
+		return FALSE;
+	}
 
 #ifdef VIV2D_SIZE_CONSTRAINTS
 	if (pDstPixmap->drawable.height < VIV2D_MIN_HW_HEIGHT || pDstPixmap->drawable.width * pDstPixmap->drawable.height < VIV2D_MIN_HW_SIZE_24BIT) {
@@ -1378,6 +1460,10 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		src = Viv2DPixmapPrivFromPixmap(pSrc);
 	}
 
+	if ((src && !src->bo) || !dst->bo) {
+		return FALSE;
+	}
+
 	if (pSrcPicture != NULL) {
 		if (!Viv2DGetPictureFormat(pSrcPicture->format, &src_fmt)) {
 			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported src format %s", pix_format_name(pSrcPicture->format));
@@ -1387,6 +1473,10 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 	if (pMask != NULL) {
 		msk = Viv2DPixmapPrivFromPixmap(pMask);
+	}
+
+	if (msk && !msk->bo) {
+		return FALSE;
 	}
 
 	if (pMaskPicture != NULL) {
@@ -1832,6 +1922,7 @@ static void etnaviv_init_filter_kernel(void)
 }
 
 
+#ifdef VIV2D_PUT_TEXTURE_IMAGE
 // NOTE: filter blit VIVS_DE_VR_SOURCE_IMAGE* does not work, so we need to convert to an intermediate surface before doing a standard bitblt
 // there is room for optimization, since in case of clipping we convert the full source for each clip
 // in case pDstBox == fullDstBox we avoid the tmp_dest blit operation and blit directly to dest
@@ -2055,6 +2146,7 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 		etna_bo_del(tmp_dest.bo);
 	return TRUE;
 }
+#endif
 
 struct ARMSOCEXARec *
 InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
@@ -2191,10 +2283,13 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 
 	etnaviv_init_filter_kernel();
 
+	armsoc_exa->AllocBuf = Viv2DAllocBuf;
+	armsoc_exa->FreeBuf = Viv2DFreeBuf;
 	armsoc_exa->Reattach = Viv2DReattach;
 	armsoc_exa->GetFormats = Viv2DGetFormats;
+#ifdef VIV2D_PUT_TEXTURE_IMAGE
 	armsoc_exa->PutTextureImage = Viv2DPutTextureImage;
-
+#endif
 	INFO_MSG("Viv2DEXA: initialized.");
 
 	return armsoc_exa;

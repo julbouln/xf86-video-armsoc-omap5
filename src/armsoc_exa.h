@@ -39,6 +39,13 @@
 #include "exa.h"
 #include "compat-api.h"
 
+struct ARMSOCEXABuf {
+	void *buf;
+	size_t size;
+	unsigned short pitch;
+	void *priv;
+};
+
 /**
  * A per-Screen structure used to communicate and coordinate between the
  * ARMSOC X driver and an external EXA sub-module (if loaded).
@@ -62,6 +69,9 @@ struct ARMSOCEXARec {
 			unsigned int format);
 
 	void (*Reattach)(PixmapPtr pixmap, int width, int height, int stride);
+
+	void (*AllocBuf)(struct ARMSOCEXARec *exa, int width, int height, int bpp, struct ARMSOCEXABuf *buf);
+	void (*FreeBuf)(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf);
 
 	/**
 	 * Called by X driver's FreeScreen() function at the end of each
@@ -115,12 +125,19 @@ struct ARMSOCPixmapPrivRec {
 	 */
 	int ext_access_cnt;
 	struct armsoc_bo *bo;
+	struct ARMSOCEXABuf buf;
+/*
+	void *unaccel;
+	size_t unaccel_size;
+	unsigned short unaccel_pitch;
+	void *unaccel_priv;
+	*/
 	int usage_hint;
 };
 
+Bool is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size);
 
 #define ARMSOC_CREATE_PIXMAP_SCANOUT 0x80000000
-
 
 void *ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 		int depth, int usage_hint, int bitsPerPixel,

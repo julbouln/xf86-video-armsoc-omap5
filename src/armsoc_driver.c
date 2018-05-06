@@ -983,7 +983,6 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 		pARMSOC->dri2 = FALSE;
 		pARMSOC->dri3 = FALSE;		
 	}
-
 }
 
 /**
@@ -1006,6 +1005,8 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	int depth;
 
 	TRACE_ENTER();
+
+	pARMSOC->created_scanout_pixmap = FALSE;
 
 	/* set drm master before allocating scanout buffer */
 	if (ARMSOCSetDRMMaster()) {
