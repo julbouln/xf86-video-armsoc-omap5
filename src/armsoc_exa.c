@@ -31,7 +31,6 @@
 
 #include "armsoc_exa.h"
 #include "armsoc_driver.h"
-#include "umplock/umplock_ioctl.h"
 #include <sys/ioctl.h>
 #include <unistd.h>
 

@@ -895,10 +895,6 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 			OPTION_NO_FLIP, FALSE);
 	INFO_MSG("Buffer Flipping is %s",
 				pARMSOC->NoFlip ? "Disabled" : "Enabled");
-	pARMSOC->useUmplock = xf86ReturnOptValBool(pARMSOC->pOptionInfo,
-			OPTION_UMP_LOCK, FALSE);
-	INFO_MSG("umplock is %s",
-				pARMSOC->useUmplock ? "Disabled" : "Enabled");
 
 	/*
 	 * Select the video modes:
@@ -1183,15 +1179,6 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	wrap(pARMSOC, pScreen, BlockHandler, ARMSOCBlockHandler);
 	drmmode_screen_init(pScrn);
 
-	if (pARMSOC->useUmplock) {
-		pARMSOC->lockFD = open("/dev/umplock", O_RDWR);
-
-		if (-1 == pARMSOC->lockFD)
-			ERROR_MSG("Failed to open umplock device!");
-	} else {
-		pARMSOC->lockFD = -1;
-	}
-
 	TRACE_EXIT();
 	return TRUE;
 
@@ -1305,11 +1292,6 @@ ARMSOCCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 		ARMSOCLeaveVT(VT_FUNC_ARGS(0));
 
 	pScrn->vtSema = FALSE;
-
-	if (-1 != pARMSOC->lockFD) {
-		close(pARMSOC->lockFD);
-		pARMSOC->lockFD = -1;
-	}
 
 	TRACE_EXIT();
 

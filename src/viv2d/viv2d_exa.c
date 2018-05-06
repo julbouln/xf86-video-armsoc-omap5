@@ -34,7 +34,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include "umplock/umplock_ioctl.h"
 #include <sys/ioctl.h>
 
 #include <mipict.h>
@@ -55,7 +54,7 @@
 #define VIV2D_COPY 1
 #define VIV2D_COMPOSITE 1
 #define VIV2D_PUT_TEXTURE_IMAGE 1
-//#define VIV2D_UPLOAD_TO_SCREEN 1
+#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1 // does not work
 
 #define VIV2D_MASK_SUPPORT 1 // support mask
@@ -649,7 +648,6 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
  */
 
 #ifdef VIV2D_UPLOAD_TO_SCREEN
-
 static Bool Viv2DUploadToScreen(PixmapPtr pDst,
                                 int x,
                                 int y, int w, int h, char *src, int src_pitch) {
@@ -664,6 +662,9 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	char *src_buf, *buf;
 
 	if (w * h < 4)
+		return FALSE;
+
+	if(!dst->bo)
 		return FALSE;
 
 #ifdef VIV2D_SIZE_CONSTRAINTS
