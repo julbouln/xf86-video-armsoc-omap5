@@ -187,7 +187,6 @@ static int VIV2DDetectDevice(const char *name)
 				return fd;
 			}
 		}
-
 		close(fd);
 	}
 
@@ -196,7 +195,6 @@ static int VIV2DDetectDevice(const char *name)
 
 static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
 	if (armsocPix) {
-//		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 		Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
 		if (armsocPix->bo == pARMSOC->scanout) {
@@ -413,7 +411,7 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 	// only if pixmap has been used
 	if (pix->refcnt > 0) {
 		// flush if remaining state
-		if (etna_cmd_stream_offset(v2d->stream) > 0) {
+		if (pix->bo && etna_cmd_stream_offset(v2d->stream) > 0) {
 			_Viv2DStreamCommit(v2d, TRUE);
 		}
 		pix->refcnt = -1;
@@ -439,7 +437,6 @@ Viv2DFinishAccess(PixmapPtr pPixmap, int index)
 		pix->refcnt = 0;
 	}
 }
-
 
 /**
  * PixmapIsOffscreen() is an optional driver replacement to
@@ -526,12 +523,8 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int b
 
 	if (size > VIV2D_MIN_SIZE) {
 		struct etna_bo *bo;
-
-//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
+		//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
 		bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
-		if (!bo) {
-//		VIV2D_INFO_MSG("Viv2DAllocBuf CANNOT ALLOCATE BO");
-		}
 		buf->priv = (void *)bo;
 		buf->buf = (void *)etna_bo_map(bo);
 	} else {
@@ -602,7 +595,7 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 				VIV2D_DBG_MSG("Viv2DModifyPixmapHeader unaccel pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
 				pix->width = width;
 				pix->height = height;
-				pix->pitch = armsocPix->buf.pitch;//ALIGN(width * ((bitsPerPixel + 7) / 8), VIV2D_PITCH_ALIGN);
+				pix->pitch = armsocPix->buf.pitch;
 				Viv2DDetachBo(pARMSOC, armsocPix);
 				return Viv2DAttachBo(pARMSOC, armsocPix);
 			}
@@ -665,7 +658,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	if (w * h < 4)
 		return FALSE;
 
-	if(!dst->bo)
+	if (!dst->bo)
 		return FALSE;
 
 #ifdef VIV2D_SIZE_CONSTRAINTS
@@ -722,8 +715,8 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-//	_Viv2DStreamCommit(v2d, TRUE);
-//	exaMarkSync(pDst->drawable.pScreen);
+	_Viv2DStreamCommit(v2d, TRUE);
+	exaMarkSync(pDst->drawable.pScreen);
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d", pDst, etna_bo_map(dst->bo), src, src_pitch, tmp->pitch, x, y, w, h,
 	              pDst->drawable.width, pDst->drawable.height,
@@ -1939,7 +1932,7 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	Bool tmp_bitblt = TRUE;
 	int reserve = 0;
 
-	if(!src->bo || !dst->bo)
+	if (!src->bo || !dst->bo)
 		return FALSE;
 
 	int s_w = pSrcPix->drawable.width;
