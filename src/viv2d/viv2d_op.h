@@ -112,11 +112,11 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 }
 
 static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height) {
+	Viv2DPixmapPrivPtr tmp;
+	int pitch;
 	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
 		_Viv2DStreamCommit(v2d, FALSE);
 	}
-	Viv2DPixmapPrivPtr tmp;
-	int pitch;
 
 	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
 	pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);

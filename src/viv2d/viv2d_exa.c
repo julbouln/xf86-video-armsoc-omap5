@@ -218,8 +218,8 @@ static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 			if (armsocPix->bo == pARMSOC->scanout) {
 				pix->bo = v2d->bo;
 			} else {
-				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap");
 				int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
+				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap");
 				if (fd) {
 					pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 					close(fd);
@@ -658,7 +658,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	Viv2DRect rects[1];
 	int height = h;
 	Viv2DPixmapPrivPtr tmp;
-	int pitch, size;
+	int pitch;
 	char *src_buf, *buf;
 
 	if (w * h < 4)
@@ -695,8 +695,6 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	dst->refcnt++;
 
 	pitch = tmp->pitch;
-	size = pitch * tmp->height;
-
 
 #if 0
 	if (pitch == src_pitch)
