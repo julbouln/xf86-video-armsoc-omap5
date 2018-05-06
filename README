@@ -32,4 +32,9 @@ Section "Device"
 	Option 		"DRICard" "1" # must point to the /dev/dri/cardX corresponding to omapdrm because detection can sometimes fail
 EndSection
 
-Based on https://cgit.freedesktop.org/xorg/driver/xf86-video-armsoc, https://github.com/xobs/xserver-xorg-video-armada and https://github.com/mxOBS/deb-pkg_xserver-xorg-video-imx-viv
+Based on 
+- https://cgit.freedesktop.org/xorg/driver/xf86-video-armsoc
+- https://github.com/xobs/xserver-xorg-video-armada
+- https://github.com/mxOBS/deb-pkg_xserver-xorg-video-imx-viv
+- https://github.com/endlessm/xf86-video-armsoc
+- https://github.com/tobiasjakobi/xf86-video-armsoc

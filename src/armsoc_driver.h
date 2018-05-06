@@ -234,7 +234,7 @@ Bool drmmode_cursor_init(ScreenPtr pScreen);
 void drmmode_cursor_fini(ScreenPtr pScreen);
 void drmmode_init_wakeup_handler(struct ARMSOCRec *pARMSOC);
 void drmmode_fini_wakeup_handler(struct ARMSOCRec *pARMSOC);
-
+uint32_t drmmode_get_crtc_id(ScrnInfoPtr pScrn);
 
 /**
  * DRI2 functions..

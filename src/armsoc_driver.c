@@ -974,8 +974,7 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 		pARMSOC->dri3 = ARMSOCDRI3ScreenInit(pScreen); // DRI3
 		armsoc_present_screen_init(pScreen); // Present
 		ARMSOCVideoScreenInit(pScreen); // XV
-	}
-	else {
+	} else {
 		pARMSOC->dri2 = FALSE;
 		pARMSOC->dri3 = FALSE;		
 	}

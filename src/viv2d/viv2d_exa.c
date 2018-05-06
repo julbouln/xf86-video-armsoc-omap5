@@ -68,7 +68,7 @@
 //#define VIV2D_SUPPORT_A8_DST 1
 
 #define VIV2D_MIN_SIZE 8192
-//#define VIV2D_MIN_SIZE 0
+//#define VIV2D_MIN_SIZE 1024
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 
@@ -1053,6 +1053,7 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 	}
 #endif
 
+//	exaWaitSync(pDstPixmap->drawable.pScreen);
 	dst->refcnt++;
 
 	_Viv2DOpInit(&v2d->op);
@@ -1483,6 +1484,8 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported dst format %s", pix_format_name(pDstPicture->format));
 		return FALSE;
 	}
+
+//	exaWaitSync(pDst->drawable.pScreen);
 
 	dst->refcnt++;
 
