@@ -131,7 +131,6 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 
 static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
 	etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
-	_Viv2OpClearTmpPix(v2d);
 }
 
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
@@ -142,6 +141,7 @@ static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 
 	if (!async) {
 		_Viv2DStreamWait(v2d);
+		_Viv2OpClearTmpPix(v2d);
 	}
 }
 
