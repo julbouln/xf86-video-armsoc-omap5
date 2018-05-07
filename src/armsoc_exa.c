@@ -34,7 +34,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
+#define ARMSOC_BO_MIN_SIZE (2048 * 2048)
 //#define ARMSOC_BO_MIN_SIZE 0
 
 Bool
@@ -90,15 +90,8 @@ ARMSOCPixmapExchange(PixmapPtr a, PixmapPtr b)
 	}
 }
 
-#define PAGE_SHIFT      12
-#define PAGE_SIZE       (1UL << PAGE_SHIFT)
-#define PAGE_MASK       (~(PAGE_SIZE-1))
-#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
-
-#define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
-
 static void *
-CreateNoAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
+CreateUnAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
                     int depth, int bitsPerPixel,
                     int *new_fb_pitch)
 {
@@ -106,29 +99,14 @@ CreateNoAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int wid
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
-		/*
-		int pitch = ALIGN(((width * bitsPerPixel + FB_MASK) >> FB_SHIFT) * sizeof(FbBits),32);
-		size_t datasize = PAGE_ALIGN(pitch * height);
-		priv->unaccel_pitch = pitch;
-		posix_memalign(&priv->unaccel, PAGE_SIZE, datasize);
-		*/
-
+//		INFO_MSG("AllocBuf create %p", &priv->buf);
 		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
-//		priv->unaccel_size = pitch * height;
-//		priv->unaccel_pitch = pitch;
-		/*
-				int pitch = ((width * bitsPerPixel + FB_MASK) >> FB_SHIFT) * sizeof(FbBits);
-				size_t datasize = pitch * height;
-				priv->unaccel_pitch = pitch;
-				priv->unaccel = malloc(datasize);
-		*/
+
 		if (!priv->buf.buf) {
 			ERROR_MSG("failed to allocate %dx%d mem", width, height);
 			free(priv);
 			return NULL;
 		}
-//		priv->unaccel_size = datasize;
-//		INFO_MSG("CreateNoAccelPixmap armsocpix:%x page_size:%d size:%d pitch:%d pitch_align:%d", priv, PAGE_SIZE, priv->unaccel_size, pitch, pitch % 32);
 		*new_fb_pitch = priv->buf.pitch;
 	}
 
@@ -190,11 +168,6 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
-	priv->buf.buf = NULL;
-	priv->buf.priv = NULL;
-	priv->buf.size = 0;
-	priv->buf.pitch = 0;
-
 //   INFO_MSG("ARMSOCCreatePixmap2 %x", priv);
 
 	if (!priv)
@@ -209,7 +182,7 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 	if (is_accel_pixmap(priv, width * height * (bitsPerPixel / 8)))
 		return CreateAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
 	else
-		return CreateNoAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+		return CreateUnAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
 }
 
 _X_EXPORT void
@@ -221,8 +194,6 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 
 	assert(!priv->ext_access_cnt);
 
-//    INFO_MSG("ARMSOCDestroyPixmap %x", priv);
-
 	/* If ModifyPixmapHeader failed, it's possible we don't have a bo
 	 * backing this pixmap. */
 	if (priv->bo) {
@@ -232,10 +203,9 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	}
 
 	if (priv->buf.buf) {
+//			INFO_MSG("FreeBuf destroy %p", &priv->buf);
 		pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
-//		priv->unaccel = NULL;
 	}
-//		free(priv->unaccel);
 
 	free(priv);
 }
@@ -248,14 +218,16 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	size_t datasize;
+	size_t size;
 
 	/* Only modify specified fields, keeping all others intact. */
 	if (pPixData)
 		pPixmap->devPrivate.ptr = pPixData;
 
-	if (devKind > 0)
+	if (devKind > 0) {
+//		INFO_MSG("change pitch %d -> %d",pPixmap->devKind,devKind);
 		pPixmap->devKind = devKind;
+	}
 
 	/*
 	 * Someone is messing with the memory allocation. Let's step out of
@@ -263,6 +235,7 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 	 */
 	if (pPixData && pPixData != priv->buf.buf) {
 		if (priv->buf.buf) {
+//			INFO_MSG("FreeBuf modify (diff buf) %p", &priv->buf);
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 		}
 
@@ -295,33 +268,24 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 	if (!pPixmap->drawable.width || !pPixmap->drawable.height)
 		return TRUE;
 
-	datasize = (devKind * height);
-//	datasize = (devKind * height);
-	if (!priv->buf.buf || priv->buf.size != datasize) {
+	size = (devKind * height);
+	if (!priv->buf.buf || priv->buf.size != size) {
 
 		/* re-allocate buffer! */
 		if (priv->buf.buf) {
+//			INFO_MSG("FreeBuf modify (diff size or no buf) %p", &priv->buf);
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
-//			priv->unaccel = NULL;
-
-//			free(priv->unaccel);
 		}
 
-//		int pitch = 0;
-		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
-//		priv->unaccel = malloc(datasize);
-//		posix_memalign(&priv->unaccel, PAGE_SIZE, datasize);
+//		INFO_MSG("AllocBuf modify %p",&priv->buf);
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
 			ERROR_MSG("failed to allocate %d bytes mem",
-			          datasize);
+			          size);
 			priv->buf.size = 0;
-//			priv->unaccel_size = 0;
 			return FALSE;
 		}
-//		priv->unaccel_size = datasize;
-//		priv->unaccel_pitch = devKind;
-//		INFO_MSG("ModifyUnAccelPixmapHeader armsocpix:%x page_size:%d size:%d pitch:%d pitch_align:%d", priv, PAGE_SIZE, priv->unaccel_size, devKind, devKind % 32);
 
 	}
 

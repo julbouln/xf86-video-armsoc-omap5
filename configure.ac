@@ -46,6 +46,7 @@ XORG_DEFAULT_OPTIONS
 LT_INIT([disable-static])
 # Checks for programs.
 AC_PROG_CC
+AM_PROG_AS
 
 AC_CHECK_HEADERS([sys/ioctl.h])
 AC_CHECK_HEADERS([stdint.h])

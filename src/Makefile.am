@@ -28,6 +28,15 @@
 # _ladir passes a dummy rpath to libtool so the thing will actually link
 # TODO: -nostdlib/-Bstatic/-lgcc platform magic, not installing the .a, etc.
 
+
+NEON_CFLAGS=-march=armv7-a -mfpu=neon -mfloat-abi=hard -Wa,-mfpu=neon
+
+NEON_CCASFLAGS=$(NEON_CFLAGS) -mthumb-interwork
+NEON_ASFLAGS=-k -mcpu=cortex-a15 $(NEON_CCASFLAGS)
+
+AM_ASFLAGS = $(NEON_ASFLAGS)
+AM_CCASFLAGS = $(NEON_CCASFLAGS)
+
 # TODO: probably should have configure script check for what is supported..
 ERROR_CFLAGS = -Wall -Wdeclaration-after-statement -Wvla \
 	-Wpointer-arith -Wmissing-declarations -Wmissing-prototypes \
@@ -57,5 +66,6 @@ omap5_drv_la_SOURCES = \
          armsoc_dri3.c \
          armsoc_present.c \
          armsoc_xv.c \
+         neon_memcpy.S \
          viv2d/viv2d_exa.c \
          $(DRMMODE_SRCS)
