@@ -34,7 +34,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#define ARMSOC_BO_MIN_SIZE (2048 * 2048)
+#define ARMSOC_BO_MIN_SIZE (256 * 256)
 //#define ARMSOC_BO_MIN_SIZE 0
 
 Bool

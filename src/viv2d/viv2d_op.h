@@ -14,45 +14,6 @@
 
 // etnaviv utils
 
-#if 0
-typedef struct {
-	int counter;
-} atomic_t;
-
-
-struct list_head
-{
-    struct list_head *prev;
-    struct list_head *next;
-};
-
-/* a GEM buffer object allocated from the DRM device */
-struct etna_bo {
-	struct etna_device      *dev;
-	void            *map;           /* userspace mmap'ing (if there is one) */
-	uint32_t        size;
-	uint32_t        handle;
-	uint32_t        flags;
-	uint32_t        name;           /* flink global handle (DRI2 name) */
-	uint64_t        offset;         /* offset to mmap() */
-	atomic_t        refcnt;
-
-	/* in the common case, a bo won't be referenced by more than a single
-	 * command stream.  So to avoid looping over all the bo's in the
-	 * reloc table to find the idx of a bo that might already be in the
-	 * table, we cache the idx in the bo.  But in order to detect the
-	 * slow-path where bo is ref'd in multiple streams, we also must track
-	 * the current_stream for which the idx is valid.  See bo2idx().
-	 */
-	struct etna_cmd_stream *current_stream;
-	uint32_t idx;
-
-	int reuse;
-	struct list_head list;   /* bucket-list entry */
-	time_t free_time;        /* time when added to bucket-list */
-};
-#endif
-
 static inline void etna_emit_load_state(struct etna_cmd_stream *stream,
                                         const uint16_t offset, const uint16_t count)
 {
@@ -93,6 +54,66 @@ static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t
 
 }
 
+#ifdef VIV2D_CACHE_BO
+static inline void Viv2DCacheInit(Viv2DPtr v2d) {
+	int i;
+	for (i = 0; i < 1024; i++) {
+		v2d->cache[i].bo = NULL;
+		v2d->cache[i].size = 0;
+		v2d->cache[i].used = 0;
+	}
+}
+
+static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
+	struct etna_bo *bo;
+	int i;
+	bo = NULL;
+
+	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
+		// free to use
+		if (!v2d->cache[i].used && size < v2d->cache[i].size) {
+			v2d->cache[i].used = 1;
+			bo = v2d->cache[i].bo;
+			return bo;
+		}
+		// empty entry
+		if (v2d->cache[i].size == 0) {
+			v2d->cache[i].used = 1;
+			v2d->cache[i].size = ALIGN(size, 4096);
+			bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
+			return bo;
+		}
+	}
+
+	// recycle
+	if (!bo) {
+		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
+			if (!v2d->cache[i].used) {
+				etna_bo_del(v2d->cache[i].bo);
+				v2d->cache[i].used = 1;
+				v2d->cache[i].size = ALIGN(size, 4096);
+				bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
+				return bo;
+			}
+		}
+
+	}
+
+	VIV2D_INFO_MSG("Viv2DCacheNewBo: cannot get a cached bo");
+	return bo;
+}
+
+static inline void Viv2DCacheDelBo(Viv2DPtr v2d, struct etna_bo *bo) {
+	int i;
+	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
+		if (v2d->cache[i].bo == bo) {
+			v2d->cache[i].used = 0;
+			return;
+		}
+	}
+}
+#endif
+
 static inline void _Viv2DOpAddRect(Viv2DOp *op, int x, int y, int width, int height) {
 	Viv2DRect rect;
 	rect.x1 = x;
@@ -114,7 +135,6 @@ static inline void _Viv2DOpInit(Viv2DOp *op) {
 	op->msk = NULL;
 	op->fg = 0;
 	op->mask = 0;
-//	op->tmp_pix_cnt = 0;
 }
 
 static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
@@ -123,20 +143,28 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 			Viv2DPixmapPrivPtr tmp;
 			v2d->tmp_pix_cnt--;
 			tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
-			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d",tmp->bo, v2d->tmp_pix_cnt);
+			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d", tmp->bo, v2d->tmp_pix_cnt);
+#ifdef VIV2D_CACHE_BO
+			Viv2DCacheDelBo(v2d, tmp->bo);
+#else
 			etna_bo_del(tmp->bo);
+#endif
 		} while (v2d->tmp_pix_cnt);
 	}
 }
 
 static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
+	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait start");
 	etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
+	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait end");
 }
 
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 	VIV2D_DBG_MSG("_Viv2DStreamCommit %d %d (%d)", async, etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	if (etna_cmd_stream_offset(v2d->stream) > 0) {
+		VIV2D_DBG_MSG("_Viv2DStreamCommit flush start %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
+		VIV2D_DBG_MSG("_Viv2DStreamCommit flush end %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	}
 
 	if (!async) {
@@ -149,28 +177,32 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 {
 	if (etna_cmd_stream_avail(v2d->stream) < n) {
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
-//		_Viv2DStreamCommit(v2d, TRUE);
 		etna_cmd_stream_flush(v2d->stream);
 		etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
 	}
 }
 
-static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height) {
+static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height, int bpp) {
 	Viv2DPixmapPrivPtr tmp;
 	int pitch;
 
 	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
+//		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix achieved %d %d", v2d->tmp_pix_cnt, v2d->stream->offset);
 		_Viv2DStreamCommit(v2d, FALSE);
+//		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix commit %d", v2d->tmp_pix_cnt);
 	}
 
 	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
-	pitch = ALIGN(width * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
+#ifdef VIV2D_CACHE_BO
+	tmp->bo = Viv2DCacheNewBo(v2d, pitch * height);
+#else
 	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
+#endif
 	VIV2D_DBG_MSG("_Viv2DOpCreateTmpPix %p %dx%d %d", tmp->bo, width, height, pitch * height);
 	tmp->width = width;
 	tmp->height = height;
 	tmp->pitch = pitch;
-//	VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix %d", v2d->tmp_pix_cnt);
 	v2d->tmp_pix_cnt++;
 
 	return tmp;

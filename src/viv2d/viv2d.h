@@ -10,10 +10,13 @@
 #include "state_2d.xml.h"
 #include "cmdstream.xml.h"
 
-#define VIV2D_STREAM_SIZE 4096
+#define VIV2D_STREAM_SIZE 1024*4
 #define VIV2D_MAX_RECTS 256
 #define VIV2D_MAX_TMP_PIX 1024
 #define VIV2D_PITCH_ALIGN 32
+
+//#define VIV2D_CACHE_BO 1
+//#define VIV2D_CACHE_SIZE 1024*4
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
@@ -69,6 +72,12 @@ typedef struct _Viv2DFormat {
 	int swizzle;
 	int alphaBits;
 } Viv2DFormat;
+
+typedef struct _Viv2DBoCacheEntry {
+	struct etna_bo *bo;
+	int size;
+	int used;
+} Viv2DBoCacheEntry;
 
 typedef struct {
 	struct etna_bo *bo;
@@ -143,6 +152,9 @@ typedef struct _Viv2DRec {
 	Viv2DPixmapPrivRec tmp_pix[VIV2D_MAX_TMP_PIX];
 	int tmp_pix_cnt;
 
+#ifdef VIV2D_CACHE_BO
+	Viv2DBoCacheEntry cache[VIV2D_CACHE_SIZE];
+#endif
 } Viv2DRec, *Viv2DPtr;
 
 
