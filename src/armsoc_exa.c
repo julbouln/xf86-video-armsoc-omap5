@@ -34,7 +34,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#define ARMSOC_BO_MIN_SIZE (256 * 256)
+//#define ARMSOC_BO_MIN_SIZE (2048 * 2048)
+#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
 //#define ARMSOC_BO_MIN_SIZE 0
 
 Bool
@@ -225,7 +226,6 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 		pPixmap->devPrivate.ptr = pPixData;
 
 	if (devKind > 0) {
-//		INFO_MSG("change pitch %d -> %d",pPixmap->devKind,devKind);
 		pPixmap->devKind = devKind;
 	}
 
@@ -268,9 +268,8 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 	if (!pPixmap->drawable.width || !pPixmap->drawable.height)
 		return TRUE;
 
-	size = (devKind * height);
+	size = devKind * height;
 	if (!priv->buf.buf || priv->buf.size != size) {
-
 		/* re-allocate buffer! */
 		if (priv->buf.buf) {
 //			INFO_MSG("FreeBuf modify (diff size or no buf) %p", &priv->buf);
@@ -287,6 +286,7 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 			return FALSE;
 		}
 
+		pPixmap->devKind = priv->buf.pitch;
 	}
 
 	return TRUE;

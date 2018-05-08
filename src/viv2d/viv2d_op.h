@@ -12,6 +12,12 @@
 
 #define ETNAVIV_WAIT_PIPE_MS 1000
 
+
+#define PAGE_SHIFT      12
+#define PAGE_SIZE       (1UL << PAGE_SHIFT)
+#define PAGE_MASK       (~(PAGE_SIZE-1))
+#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
+
 // etnaviv utils
 
 static inline void etna_emit_load_state(struct etna_cmd_stream *stream,

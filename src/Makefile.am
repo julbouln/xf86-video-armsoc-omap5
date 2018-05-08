@@ -44,7 +44,7 @@ ERROR_CFLAGS = -Wall -Wdeclaration-after-statement -Wvla \
 	-Wold-style-definition -Winit-self -Wmissing-include-dirs \
 	-Waddress -Waggregate-return -Wno-multichar -Wnested-externs
  
-AM_CFLAGS = @XORG_CFLAGS@ $(ERROR_CFLAGS)
+AM_CFLAGS = @XORG_CFLAGS@
 omap5_drv_la_LTLIBRARIES = omap5_drv.la
 omap5_drv_la_LDFLAGS = -module -avoid-version -no-undefined
 omap5_drv_la_LIBADD = @XORG_LIBS@
@@ -67,5 +67,6 @@ omap5_drv_la_SOURCES = \
          armsoc_present.c \
          armsoc_xv.c \
          neon_memcpy.S \
+         viv2d/etnaviv.c \
          viv2d/viv2d_exa.c \
          $(DRMMODE_SRCS)

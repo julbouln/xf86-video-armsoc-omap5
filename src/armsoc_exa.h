@@ -42,7 +42,7 @@
 struct ARMSOCEXABuf {
 	void *buf;
 	size_t size;
-	unsigned short pitch;
+	int pitch;
 	void *priv;
 };
 

@@ -48,6 +48,8 @@ LT_INIT([disable-static])
 AC_PROG_CC
 AM_PROG_AS
 
+AC_PROG_CC_STDC
+
 AC_CHECK_HEADERS([sys/ioctl.h])
 AC_CHECK_HEADERS([stdint.h])
 
@@ -71,7 +73,6 @@ PKG_CHECK_MODULES(XORG,
                   xproto
                   fontsproto
                   libdrm
-                  libdrm_etnaviv
                   dri2proto
                   pixman-1
                   $REQUIRED_MODULES)

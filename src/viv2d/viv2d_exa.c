@@ -59,8 +59,8 @@
 #define VIV2D_COMPOSITE 1
 #define VIV2D_PUT_TEXTURE_IMAGE 1
 
-//#define VIV2D_UPLOAD_TO_SCREEN 1
-//#define VIV2D_DOWNLOAD_FROM_SCREEN 1
+#define VIV2D_UPLOAD_TO_SCREEN 1
+#define VIV2D_DOWNLOAD_FROM_SCREEN 1
 
 #define VIV2D_MASK_SUPPORT 1 // support mask
 #define VIV2D_SOLID_PICTURE 1 // support solid clear picture
@@ -75,8 +75,8 @@
 
 //#define VIV2D_USERPTR 1
 
-#define VIV2D_MIN_SIZE 1024
-//#define VIV2D_MIN_SIZE 1024*1024*1024
+//#define VIV2D_MIN_SIZE 0
+#define VIV2D_MIN_SIZE 1024 // > 16x16 32bpp
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 //#define VIV2D_MIN_HW_HEIGHT 64
@@ -135,43 +135,6 @@ viv2d_pict_format[] = {
 	{NO_PICT_FORMAT, 0, 0, 0}
 	/*END*/
 };
-
-// others utils
-
-
-#ifdef VIV2D_USERPTR
-// requires libdrm etnaviv patch https://patchwork.kernel.org/patch/9912089/
-
-#define PAGE_SHIFT      12
-#define PAGE_SIZE       (1UL << PAGE_SHIFT)
-#define PAGE_MASK       (~(PAGE_SIZE-1))
-#define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
-
-static struct etna_bo *etna_bo_from_usermem_prot(Viv2DPtr v2d, void *memory, size_t size) {
-	struct etna_bo *mem = NULL;
-	struct drm_etnaviv_gem_userptr req = {
-		.user_ptr = (uint64_t)memory,
-		.user_size = (uint64_t)size,
-		.flags = (uint32_t)(ETNA_USERPTR_READ | ETNA_USERPTR_WRITE),
-	};
-	int err;
-
-	err = drmCommandWriteRead(v2d->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
-	                          sizeof(req));
-	if (err) {
-		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
-		mem = NULL;
-	}
-	else {
-		mem = etna_bo_from_handle(v2d->dev, req.handle, size);
-		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, mem, req.handle, size);
-//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d -> %d %d -> %d %d", memory, mem, req.handle, mem->handle, size, mem->size, mem->offset);
-
-	}
-
-	return mem;
-}
-#endif
 
 static int VIV2DDetectDevice(const char *name)
 {
@@ -455,6 +418,11 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 	Viv2DPixmapPrivPtr pix = armsocPix->priv;
 
 	VIV2D_DBG_MSG("Viv2DPrepareAccess %p (%dx%d) %d (%d)", pPixmap, pix->width, pix->height, index, pix->refcnt);
+
+//	if (pix->bo) {
+//		etnaviv_bo_wait(v2d, pix->bo);
+//	}
+
 	// only if pixmap has been used
 	if (pix->refcnt > 0) {
 		// flush if remaining state
@@ -462,8 +430,6 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 			_Viv2DStreamCommit(v2d, FALSE);
 		}
 		pix->refcnt = -1;
-		if (pix->bo)
-			etna_bo_cpu_prep(pix->bo, idx2op(index));
 	}
 
 	return ARMSOCPrepareAccess(pPixmap, index);
@@ -600,7 +566,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int b
 //		buf->buf = malloc_aligned(PAGE_SIZE, PAGE_ALIGN(size));
 		buf->buf = aligned_alloc(PAGE_SIZE, PAGE_ALIGN(size));
 //		posix_memalign(&buf->buf, PAGE_SIZE, size);
-		bo = etna_bo_from_usermem_prot(v2d, buf->buf, PAGE_ALIGN(size));
+		bo = etna_bo_from_usermem_prot(v2d->dev, buf->buf, PAGE_ALIGN(size));
 		if (!bo) {
 			// fail fallback to normal bo
 			VIV2D_INFO_MSG("Viv2DAllocBuf: bo from usermem failed, create standard bo");
@@ -617,7 +583,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int b
 		bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
 #endif
 		buf->priv = (void *)bo;
-		buf->buf = (void *)etna_bo_map(bo);
+		buf->buf = etna_bo_map(bo);
 #endif
 	} else {
 		VIV2D_DBG_MSG("Viv2DAllocBuf: buf too small %p %d", buf, size);

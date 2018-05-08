@@ -15,8 +15,8 @@
 #define VIV2D_MAX_TMP_PIX 1024
 #define VIV2D_PITCH_ALIGN 32
 
-//#define VIV2D_CACHE_BO 1
-//#define VIV2D_CACHE_SIZE 1024*4
+#define VIV2D_CACHE_BO 1
+#define VIV2D_CACHE_SIZE 1024*4
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
