@@ -459,7 +459,7 @@ Viv2DPixmapIsOffscreen(PixmapPtr pPixmap)
 }
 
 static void *
-Viv2DCreatePixmap (ScreenPtr pScreen, int width, int height,
+Viv2DCreatePixmap2 (ScreenPtr pScreen, int width, int height,
                    int depth, int usage_hint, int bitsPerPixel,
                    int *new_fb_pitch)
 {
@@ -1844,8 +1844,10 @@ CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 
-//	_Viv2DStreamCommit(v2d, FALSE);
-//	_Viv2OpClearTmpPix(v2d);
+	etna_set_state(v2d->stream, VIVS_FE_AUTO_FLUSH, 0);
+
+	_Viv2DStreamCommit(v2d, FALSE);
+	_Viv2OpClearTmpPix(v2d);
 
 	etna_bo_del(v2d->bo);
 	etna_cmd_stream_del(v2d->stream);
@@ -2266,7 +2268,7 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 #endif
 
 #ifdef VIV2D_PIXMAP
-	exa->CreatePixmap2 = Viv2DCreatePixmap;
+	exa->CreatePixmap2 = Viv2DCreatePixmap2;
 	exa->DestroyPixmap = Viv2DDestroyPixmap;
 	exa->ModifyPixmapHeader = Viv2DModifyPixmapHeader;
 #else
@@ -2328,6 +2330,9 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	armsoc_exa->FreeScreen = FreeScreen;
 
 	etnaviv_init_filter_kernel();
+
+	etna_set_state(v2d->stream, VIVS_FE_AUTO_FLUSH, 1);
+	etna_cmd_stream_flush(v2d->stream);
 
 	armsoc_exa->AllocBuf = Viv2DAllocBuf;
 	armsoc_exa->FreeBuf = Viv2DFreeBuf;

@@ -29,6 +29,10 @@ static inline void etna_emit_load_state(struct etna_cmd_stream *stream,
 	etna_cmd_stream_emit(stream, v);
 }
 
+static inline void etna_nop(struct etna_cmd_stream *stream) {
+	etna_cmd_stream_emit(stream, VIV_FE_NOP_HEADER_OP_NOP);
+}
+
 static inline void etna_set_state(struct etna_cmd_stream *stream, uint32_t address, uint32_t value)
 {
 //	etna_cmd_stream_reserve(stream, 2);
@@ -81,6 +85,7 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 		if (!v2d->cache[i].used && ALIGN(size, 4096) == v2d->cache[i].size) {
 //			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
 //			etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
+
 			v2d->cache[i].used = 1;
 			bo = v2d->cache[i].bo;
 			return bo;
@@ -100,6 +105,7 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 			if (!v2d->cache[i].used) {
 //				VIV2D_INFO_MSG("Viv2DCacheNewBo: clean %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
+//				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 				etna_bo_del(v2d->cache[i].bo);
 				v2d->cache_size -= v2d->cache[i].size;
 				v2d->cache[i].size = 0;
@@ -112,6 +118,7 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 			if (!v2d->cache[i].used) {
 //				VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
+//				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 //				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 				etna_bo_del(v2d->cache[i].bo);
 				v2d->cache_size -= v2d->cache[i].size;
@@ -194,6 +201,9 @@ static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 	VIV2D_DBG_MSG("_Viv2DStreamCommit %d %d (%d)", async, etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	if (etna_cmd_stream_offset(v2d->stream) > 0) {
+//		for(int i=0;i<20;i++) {
+//			etna_nop(v2d->stream);
+//		}
 		VIV2D_DBG_MSG("_Viv2DStreamCommit flush start %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
 		VIV2D_DBG_MSG("_Viv2DStreamCommit flush end %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
