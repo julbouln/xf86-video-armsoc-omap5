@@ -63,7 +63,8 @@ static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t
 #ifdef VIV2D_CACHE_BO
 static inline void Viv2DCacheInit(Viv2DPtr v2d) {
 	int i;
-	for (i = 0; i < 1024; i++) {
+	v2d->cache_size = 0;
+	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 		v2d->cache[i].bo = NULL;
 		v2d->cache[i].size = 0;
 		v2d->cache[i].used = 0;
@@ -77,7 +78,9 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 
 	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 		// free to use
-		if (!v2d->cache[i].used && size < v2d->cache[i].size) {
+		if (!v2d->cache[i].used && ALIGN(size, 4096) == v2d->cache[i].size) {
+//			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
+//			etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 			v2d->cache[i].used = 1;
 			bo = v2d->cache[i].bo;
 			return bo;
@@ -86,8 +89,21 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 		if (v2d->cache[i].size == 0) {
 			v2d->cache[i].used = 1;
 			v2d->cache[i].size = ALIGN(size, 4096);
+			v2d->cache_size += v2d->cache[i].size;
 			bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
+//			VIV2D_INFO_MSG("Viv2DCacheNewBo: create %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
 			return bo;
+		}
+	}
+
+	if (v2d->cache_size > VIV2D_CACHE_MAX) {
+		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
+			if (!v2d->cache[i].used) {
+//				VIV2D_INFO_MSG("Viv2DCacheNewBo: clean %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
+				etna_bo_del(v2d->cache[i].bo);
+				v2d->cache_size -= v2d->cache[i].size;
+				v2d->cache[i].size = 0;
+			}
 		}
 	}
 
@@ -95,9 +111,13 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 	if (!bo) {
 		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 			if (!v2d->cache[i].used) {
+//				VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
+//				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 				etna_bo_del(v2d->cache[i].bo);
+				v2d->cache_size -= v2d->cache[i].size;
 				v2d->cache[i].used = 1;
 				v2d->cache[i].size = ALIGN(size, 4096);
+				v2d->cache_size += v2d->cache[i].size;
 				bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
 				return bo;
 			}
@@ -150,7 +170,7 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 			v2d->tmp_pix_cnt--;
 			tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
 
-//			etnaviv_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
+//			etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
 
 			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d", tmp->bo, v2d->tmp_pix_cnt);
 #ifdef VIV2D_CACHE_BO
@@ -164,7 +184,10 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 
 static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
 	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait start");
-	etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
+	int ret = etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
+	if (ret != 0) {
+		VIV2D_INFO_MSG("wait pipe failed");
+	}
 	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait end");
 }
 
@@ -186,7 +209,10 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 	if (etna_cmd_stream_avail(v2d->stream) < n) {
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
-		etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
+//		int ret = etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
+//		if (ret != 0) {
+//			VIV2D_INFO_MSG("wait pipe failed");
+//		}
 	}
 }
 

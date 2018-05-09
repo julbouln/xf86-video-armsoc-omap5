@@ -640,7 +640,7 @@ void etna_bo_del(struct etna_bo *bo)
 	free(bo);
 }
 
-void etnaviv_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo) {
+void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo) {
 	int err;
 	struct drm_etnaviv_gem_wait req = {
 		.pipe = pipe->gpu->core,

@@ -165,7 +165,7 @@ static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 				pix->bo = v2d->bo;
 			} else {
 				int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
-				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap");
+				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap %d",fd);
 				if (fd) {
 					pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 					close(fd);
@@ -391,9 +391,10 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 
 	// only if pixmap has been used
 	if (pix->refcnt > 0) {
-		_Viv2DStreamCommit(v2d, TRUE);
 		// flush if remaining state
 		if (pix->bo) {
+			_Viv2DStreamCommit(v2d, TRUE);
+//			etna_bo_wait(v2d->dev, v2d->pipe, pix->bo);
 			etna_bo_cpu_prep(pix->bo, idx2op(index));
 		}
 		pix->refcnt = -1;

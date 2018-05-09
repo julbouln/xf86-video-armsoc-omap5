@@ -14,16 +14,16 @@
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
-#define VIV2D_DBG_MSG(fmt, ...)
-/*#define VIV2D_DBG_MSG(fmt, ...)		\
+//#define VIV2D_DBG_MSG(fmt, ...)
+#define VIV2D_DBG_MSG(fmt, ...)		\
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-*/
-//#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
-#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
+
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
+/*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
 		do { xf86Msg(X_WARNING, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-
+*/
 //#define VIV2D_INFO_MSG(fmt, ...)
 #define VIV2D_INFO_MSG(fmt, ...) \
 		do { xf86Msg(X_INFO, fmt "\n",\
@@ -148,6 +148,7 @@ typedef struct _Viv2DRec {
 
 #ifdef VIV2D_CACHE_BO
 	Viv2DBoCacheEntry cache[VIV2D_CACHE_SIZE];
+	size_t cache_size;
 #endif
 } Viv2DRec, *Viv2DPtr;
 
