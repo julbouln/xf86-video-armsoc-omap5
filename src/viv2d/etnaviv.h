@@ -54,3 +54,8 @@ struct etna_cmd_stream_priv {
 	uint32_t nr_bos, max_bos;
 
 };
+
+// extra
+
+void etnaviv_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo);
+struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size);

@@ -135,6 +135,7 @@ struct ARMSOCRec {
 
 	/** user-configurable option: */
 	Bool				NoFlip;
+	Bool 				SoftExa;
 	unsigned			driNumBufs;
 
 	/** File descriptor of the connection with the DRM. */

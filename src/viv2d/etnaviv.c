@@ -108,12 +108,12 @@ void etna_gpu_del(struct etna_gpu *gpu)
 }
 
 int etna_gpu_get_param(struct etna_gpu *gpu, enum etna_param_id param,
-		uint64_t *value)
+                       uint64_t *value)
 {
 	struct etna_device *dev = gpu->dev;
 	unsigned int core = gpu->core;
 
-	switch(param) {
+	switch (param) {
 	case ETNA_GPU_MODEL:
 		*value = gpu->model;
 		return 0;
@@ -271,12 +271,12 @@ static void *grow(void *ptr, uint32_t nr, uint32_t *max, uint32_t sz)
 static inline struct etna_cmd_stream_priv *
 etna_cmd_stream_priv(struct etna_cmd_stream *stream)
 {
-    return (struct etna_cmd_stream_priv *)stream;
+	return (struct etna_cmd_stream_priv *)stream;
 }
 
 struct etna_cmd_stream *etna_cmd_stream_new(struct etna_pipe *pipe, uint32_t size,
-		void (*reset_notify)(struct etna_cmd_stream *stream, void *priv),
-		void *priv)
+        void (*reset_notify)(struct etna_cmd_stream *stream, void *priv),
+        void *priv)
 {
 	struct etna_cmd_stream_priv *stream = NULL;
 
@@ -355,7 +355,7 @@ static uint32_t append_bo(struct etna_cmd_stream *stream, struct etna_bo *bo)
 
 /* add (if needed) bo, return idx: */
 static uint32_t bo2idx(struct etna_cmd_stream *stream, struct etna_bo *bo,
-		uint32_t flags)
+                       uint32_t flags)
 {
 	struct etna_cmd_stream_priv *priv = etna_cmd_stream_priv(stream);
 	uint32_t idx;
@@ -389,7 +389,7 @@ static uint32_t bo2idx(struct etna_cmd_stream *stream, struct etna_bo *bo,
 }
 
 static void flush(struct etna_cmd_stream *stream, int in_fence_fd,
-		  int *out_fence_fd)
+                  int *out_fence_fd)
 {
 	struct etna_cmd_stream_priv *priv = etna_cmd_stream_priv(stream);
 	int ret, id = priv->pipe->id;
@@ -415,7 +415,7 @@ static void flush(struct etna_cmd_stream *stream, int in_fence_fd,
 		req.flags |= ETNA_SUBMIT_FENCE_FD_OUT;
 
 	ret = drmCommandWriteRead(gpu->dev->fd, DRM_ETNAVIV_GEM_SUBMIT,
-			&req, sizeof(req));
+	                          &req, sizeof(req));
 
 	if (ret)
 		ERROR_MSG("submit failed: %d (%s)", ret, strerror(errno));
@@ -440,7 +440,7 @@ void etna_cmd_stream_flush(struct etna_cmd_stream *stream)
 }
 
 void etna_cmd_stream_flush2(struct etna_cmd_stream *stream, int in_fence_fd,
-			    int *out_fence_fd)
+                            int *out_fence_fd)
 {
 	flush(stream, in_fence_fd, out_fence_fd);
 	reset_buffer(stream);
@@ -483,7 +483,7 @@ static int get_buffer_info(struct etna_bo *bo)
 	};
 
 	ret = drmCommandWriteRead(bo->dev->fd, DRM_ETNAVIV_GEM_INFO,
-			&req, sizeof(req));
+	                          &req, sizeof(req));
 	if (ret) {
 		return ret;
 	}
@@ -497,7 +497,7 @@ static int get_buffer_info(struct etna_bo *bo)
 
 /* allocate a new buffer object, call w/ table_lock held */
 static struct etna_bo *bo_from_handle(struct etna_device *dev,
-		uint32_t size, uint32_t handle, uint32_t flags)
+                                      uint32_t size, uint32_t handle, uint32_t flags)
 {
 	struct etna_bo *bo = calloc(sizeof(*bo), 1);
 
@@ -511,17 +511,17 @@ static struct etna_bo *bo_from_handle(struct etna_device *dev,
 
 /* allocate a new (un-tiled) buffer object */
 struct etna_bo *etna_bo_new(struct etna_device *dev, uint32_t size,
-		uint32_t flags)
+                            uint32_t flags)
 {
 	struct etna_bo *bo;
 	int ret;
 	struct drm_etnaviv_gem_new req = {
-			.flags = flags,
+		.flags = flags,
 	};
 
 	req.size = size;
 	ret = drmCommandWriteRead(dev->fd, DRM_ETNAVIV_GEM_NEW,
-			&req, sizeof(req));
+	                          &req, sizeof(req));
 	if (ret)
 		return NULL;
 
@@ -544,7 +544,7 @@ int etna_bo_dmabuf(struct etna_bo *bo)
 	int ret, prime_fd;
 
 	ret = drmPrimeHandleToFD(bo->dev->fd, bo->handle, DRM_CLOEXEC,
-				&prime_fd);
+	                         &prime_fd);
 	if (ret) {
 		ERROR_MSG("failed to get dmabuf fd: %d", ret);
 		return ret;
@@ -566,7 +566,7 @@ void *etna_bo_map(struct etna_bo *bo)
 		}
 
 		bo->map = mmap(0, bo->size, PROT_READ | PROT_WRITE,
-				MAP_SHARED, bo->dev->fd, bo->offset);
+		               MAP_SHARED, bo->dev->fd, bo->offset);
 		if (bo->map == MAP_FAILED) {
 			ERROR_MSG("mmap failed: %s", strerror(errno));
 			bo->map = NULL;
@@ -610,7 +610,7 @@ int etna_bo_cpu_prep(struct etna_bo *bo, uint32_t op)
 	get_abs_timeout(&req.timeout, 5000000000);
 
 	return drmCommandWrite(bo->dev->fd, DRM_ETNAVIV_GEM_CPU_PREP,
-			&req, sizeof(req));
+	                       &req, sizeof(req));
 }
 
 void etna_bo_cpu_fini(struct etna_bo *bo)
@@ -620,7 +620,7 @@ void etna_bo_cpu_fini(struct etna_bo *bo)
 	};
 
 	drmCommandWrite(bo->dev->fd, DRM_ETNAVIV_GEM_CPU_FINI,
-			&req, sizeof(req));
+	                &req, sizeof(req));
 }
 
 /* destroy a buffer object */
@@ -642,22 +642,21 @@ void etna_bo_del(struct etna_bo *bo)
 
 void etnaviv_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo) {
 	int err;
-	int handle = 0;
-	handle = etna_bo_handle(bo);
-	struct drm_etnaviv_gem_wait wreq = {
+	struct drm_etnaviv_gem_wait req = {
 		.pipe = pipe->gpu->core,
-		.handle = handle,
+		.handle = bo->handle,
 		.flags = 0,
 		.pad = 0,
-		.timeout = 1000000
+		.timeout = 0
 	};
 
+	get_abs_timeout(&req.timeout, 5000000000);
+
 	err = drmCommandWrite(dev->fd, DRM_ETNAVIV_GEM_WAIT,
-	                      &wreq, sizeof(wreq));
+	                      &req, sizeof(req));
 }
 
 struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size) {
-	struct etna_bo *mem = NULL;
 	struct drm_etnaviv_gem_userptr req = {
 		.user_ptr = (uintptr_t)memory,
 		.user_size = size,
@@ -670,24 +669,24 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 	                          sizeof(req));
 	if (err) {
 //		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
-		mem = NULL;
+		return NULL;
 	}
 	else {
+		struct etna_bo *usr_bo = NULL;
 		/*
-		struct drm_prime_handle args;
-		args.handle = req.handle;
-		args.flags = DRM_CLOEXEC | DRM_RDWR;
+				struct drm_prime_handle args;
+				args.handle = req.handle;
+				args.flags = DRM_CLOEXEC | DRM_RDWR;
 
-		err = drmIoctl(dev->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
-		mem = etna_bo_from_dmabuf(dev, args.fd);
-		close(args.fd);
+				err = drmIoctl(dev->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
+				mem = etna_bo_from_dmabuf(dev, args.fd);
+				close(args.fd);
 		*/
 
-		mem = bo_from_handle(dev, req.handle, size, 0);
+		usr_bo = bo_from_handle(dev, size, req.handle, 0);
+
 //		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, mem, req.handle, size);
 //		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d -> %d %d -> %d %d", memory, mem, req.handle, mem->handle, size, mem->size, mem->offset);
-
+		return usr_bo;
 	}
-
-	return mem;
 }

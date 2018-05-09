@@ -70,7 +70,9 @@ struct ARMSOCEXARec {
 
 	void (*Reattach)(PixmapPtr pixmap, int width, int height, int stride);
 
+	// EXA driver buffer allocation, typically let the render DRI card create buffers
 	void (*AllocBuf)(struct ARMSOCEXARec *exa, int width, int height, int bpp, struct ARMSOCEXABuf *buf);
+	// EXA driver buffer freeing
 	void (*FreeBuf)(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf);
 
 	/**
@@ -135,7 +137,7 @@ struct ARMSOCPixmapPrivRec {
 	int usage_hint;
 };
 
-Bool is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size);
+Bool is_dumb_pixmap(struct ARMSOCPixmapPrivRec *priv, int size);
 
 #define ARMSOC_CREATE_PIXMAP_SCANOUT 0x80000000
 

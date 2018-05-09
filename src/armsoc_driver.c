@@ -65,7 +65,7 @@ static Bool ARMSOCProbe(DriverPtr drv, int flags);
 static Bool ARMSOCPreInit(ScrnInfoPtr pScrn, int flags);
 static Bool ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL);
 static void ARMSOCLoadPalette(ScrnInfoPtr pScrn, int numColors, int *indices,
-		LOCO *colors, VisualPtr pVisual);
+                              LOCO *colors, VisualPtr pVisual);
 static Bool ARMSOCCloseScreen(CLOSE_SCREEN_ARGS_DECL);
 static Bool ARMSOCCreateScreenResources(ScreenPtr pScreen);
 static void ARMSOCBlockHandler(BLOCKHANDLER_ARGS_DECL);
@@ -82,17 +82,17 @@ static void ARMSOCFreeScreen(FREE_SCREEN_ARGS_DECL);
  * the all-upper-case version of the driver name.
  */
 _X_EXPORT DriverRec ARMSOC = {
-		ARMSOC_VERSION,
-		(char *)ARMSOC_DRIVER_NAME,
-		ARMSOCIdentify,
-		ARMSOCProbe,
-		ARMSOCAvailableOptions,
-		NULL,
-		0,
-		NULL,
+	ARMSOC_VERSION,
+	(char *)ARMSOC_DRIVER_NAME,
+	ARMSOCIdentify,
+	ARMSOCProbe,
+	ARMSOCAvailableOptions,
+	NULL,
+	0,
+	NULL,
 #ifdef XSERVER_LIBPCIACCESS
-		NULL,
-		NULL
+	NULL,
+	NULL
 #endif
 };
 
@@ -108,7 +108,7 @@ enum {
 	OPTION_DRIVERNAME,
 	OPTION_DRI_NUM_BUF,
 	OPTION_INIT_FROM_FBDEV,
-	OPTION_UMP_LOCK,
+	OPTION_SOFT_EXA,
 };
 
 /** Supported options. */
@@ -118,9 +118,9 @@ static const OptionInfoRec ARMSOCOptions[] = {
 	{ OPTION_CARD_NUM,   "DRICard",    OPTV_INTEGER, {0}, FALSE },
 	{ OPTION_BUSID,      "BusID",      OPTV_STRING,  {0}, FALSE },
 	{ OPTION_DRIVERNAME, "DriverName", OPTV_STRING,  {0}, FALSE },
-	{ OPTION_DRI_NUM_BUF, "DRI2MaxBuffers", OPTV_INTEGER, {-1}, FALSE },
+	{ OPTION_DRI_NUM_BUF, "DRI2MaxBuffers", OPTV_INTEGER, { -1}, FALSE },
 	{ OPTION_INIT_FROM_FBDEV, "InitFromFBDev", OPTV_STRING, {0}, FALSE },
-	{ OPTION_UMP_LOCK,   "UMP_LOCK",   OPTV_BOOLEAN, {0}, FALSE },
+	{ OPTION_SOFT_EXA,   "SoftEXA",   OPTV_BOOLEAN, {0}, FALSE },
 	{ -1,                NULL,         OPTV_NONE,    {0}, FALSE }
 };
 
@@ -179,20 +179,20 @@ ARMSOCShowDriverInfo(int fd)
 	EARLY_INFO_MSG("Opened DRM");
 	deviceName = drmGetDeviceNameFromFd(fd);
 	EARLY_INFO_MSG("   DeviceName is [%s]",
-			deviceName ? deviceName : "NULL");
+	               deviceName ? deviceName : "NULL");
 	drmFree(deviceName);
 	bus_id = drmGetBusid(fd);
 	EARLY_INFO_MSG("   bus_id is [%s]",
-			bus_id ? bus_id : "NULL");
+	               bus_id ? bus_id : "NULL");
 	drmFreeBusid(bus_id);
 	version = drmGetVersion(fd);
 	if (version) {
 		EARLY_INFO_MSG("   DriverName is [%s]",
-					version->name);
+		               version->name);
 		EARLY_INFO_MSG("   version is [%d.%d.%d]",
-					version->version_major,
-					version->version_minor,
-					version->version_patchlevel);
+		               version->version_major,
+		               version->version_minor,
+		               version->version_patchlevel);
 		drmFreeVersion(version);
 	} else {
 		EARLY_INFO_MSG("   version is [NULL]");
@@ -208,10 +208,10 @@ ARMSOCOpenDRMCard(void)
 	if ((connection.bus_id) || (connection.driver_name)) {
 		/* user specified bus ID or driver name - pass to drmOpen */
 		EARLY_INFO_MSG("Opening driver [%s], bus_id [%s]",
-			connection.driver_name ?
-					connection.driver_name : "NULL",
-			connection.bus_id ?
-					connection.bus_id : "NULL");
+		               connection.driver_name ?
+		               connection.driver_name : "NULL",
+		               connection.bus_id ?
+		               connection.bus_id : "NULL");
 		fd = drmOpen(connection.driver_name, connection.bus_id);
 		if (fd < 0)
 			goto fail2;
@@ -223,10 +223,10 @@ ARMSOCOpenDRMCard(void)
 
 		/* open with card_num */
 		snprintf(filename, sizeof(filename),
-				DRM_DEVICE, connection.card_num);
+		         DRM_DEVICE, connection.card_num);
 		EARLY_INFO_MSG(
-				"No BusID or DriverName specified - opening %s",
-				filename);
+		    "No BusID or DriverName specified - opening %s",
+		    filename);
 		fd = open(filename, O_RDWR, 0);
 		if (-1 == fd)
 			goto fail2;
@@ -238,18 +238,18 @@ ARMSOCOpenDRMCard(void)
 		err = drmSetInterfaceVersion(fd, &sv);
 		if (err) {
 			EARLY_ERROR_MSG(
-				"Cannot set the DRM interface version.");
+			    "Cannot set the DRM interface version.");
 			goto fail1;
 		}
 		/* get the bus id */
 		bus_id = drmGetBusid(fd);
 		if (!bus_id) {
 			EARLY_ERROR_MSG("Couldn't get BusID from %s",
-							filename);
+			                filename);
 			goto fail1;
 		}
 		EARLY_INFO_MSG("Got BusID %s", bus_id);
-		bus_id_copy = malloc(strlen(bus_id)+1);
+		bus_id_copy = malloc(strlen(bus_id) + 1);
 		if (!bus_id_copy) {
 			EARLY_ERROR_MSG("Memory alloc failed");
 			goto fail1;
@@ -275,8 +275,8 @@ fail1:
 	close(fd);
 fail2:
 	EARLY_ERROR_MSG(
-		"Cannot open a connection with the DRM - %s",
-		strerror(errno));
+	    "Cannot open a connection with the DRM - %s",
+	    strerror(errno));
 	return -1;
 }
 
@@ -396,30 +396,30 @@ static Bool ARMSOCCopyFB(ScrnInfoPtr pScrn, const char *fb_dev)
 
 	/* The stride parameters pixman takes are in multiples of uint32_t,
 	 * which is the data type of the pointer passed */
-	src_pixman_stride = src_pitch/sizeof(uint32_t);
-	dst_pixman_stride = dst_pitch/sizeof(uint32_t);
+	src_pixman_stride = src_pitch / sizeof(uint32_t);
+	dst_pixman_stride = dst_pitch / sizeof(uint32_t);
 
 	/* We could handle the cases where stride is not a multiple of uint32_t,
 	 * but they will be rare so not currently worth the added complexity */
-	if (src_pitch%sizeof(uint32_t) || dst_pitch%sizeof(uint32_t)) {
+	if (src_pitch % sizeof(uint32_t) || dst_pitch % sizeof(uint32_t)) {
 		ERROR_MSG(
-				"Buffer strides need to be a multiple of 4 bytes to initialize from fbdev device");
+		    "Buffer strides need to be a multiple of 4 bytes to initialize from fbdev device");
 		goto exit;
 	}
 
 	/* similarly using pixman_blt doesn't allow for format conversion, so
 	 * check if they don't match and print a message */
 	if (vinfo.bits_per_pixel != dst_bpp || vinfo.grayscale != 0 ||
-			vinfo.nonstd != 0 ||
-			vinfo.red.offset != pScrn->offset.red ||
-			vinfo.red.length != pScrn->weight.red ||
-			vinfo.red.msb_right != 0 ||
-			vinfo.green.offset != pScrn->offset.green ||
-			vinfo.green.length != pScrn->weight.green ||
-			vinfo.green.msb_right != 0 ||
-			vinfo.blue.offset != pScrn->offset.blue ||
-			vinfo.blue.length != pScrn->weight.blue ||
-			vinfo.blue.msb_right != 0) {
+	        vinfo.nonstd != 0 ||
+	        vinfo.red.offset != pScrn->offset.red ||
+	        vinfo.red.length != pScrn->weight.red ||
+	        vinfo.red.msb_right != 0 ||
+	        vinfo.green.offset != pScrn->offset.green ||
+	        vinfo.green.length != pScrn->weight.green ||
+	        vinfo.green.msb_right != 0 ||
+	        vinfo.blue.offset != pScrn->offset.blue ||
+	        vinfo.blue.length != pScrn->weight.blue ||
+	        vinfo.blue.msb_right != 0) {
 		ERROR_MSG("Format of %s does not match scanout buffer", fb_dev);
 		goto exit;
 	}
@@ -431,37 +431,37 @@ static Bool ARMSOCCopyFB(ScrnInfoPtr pScrn, const char *fb_dev)
 	 * created until X calls CreateScratchPixmapsForScreen(), and the screen
 	 * pixmap is not initialized until X calls CreateScreenResources */
 	pixman_ret = pixman_blt((uint32_t *)src, (uint32_t *)dst,
-			src_pixman_stride, dst_pixman_stride,
-			vinfo.bits_per_pixel, dst_bpp, vinfo.xoffset,
-			vinfo.yoffset, 0, 0, width, height);
+	                        src_pixman_stride, dst_pixman_stride,
+	                        vinfo.bits_per_pixel, dst_bpp, vinfo.xoffset,
+	                        vinfo.yoffset, 0, 0, width, height);
 	if (!pixman_ret) {
 		armsoc_bo_cpu_fini(pARMSOC->scanout, 0);
 		ERROR_MSG("Pixman failed to blit from %s to scanout buffer",
-				fb_dev);
+		          fb_dev);
 		goto exit;
 	}
 
 	/* fill any area not covered by the blit */
 	if (width < dst_width) {
 		pixman_ret = pixman_fill((uint32_t *)dst, dst_pixman_stride,
-				dst_bpp, width, 0, dst_width-width, dst_height,
-				0);
+		                         dst_bpp, width, 0, dst_width - width, dst_height,
+		                         0);
 		if (!pixman_ret) {
 			armsoc_bo_cpu_fini(pARMSOC->scanout, 0);
 			ERROR_MSG(
-					"Pixman failed to fill margin of scanout buffer");
+			    "Pixman failed to fill margin of scanout buffer");
 			goto exit;
 		}
 	}
 
 	if (height < dst_height) {
 		pixman_ret = pixman_fill((uint32_t *)dst, dst_pixman_stride,
-				dst_bpp, 0, height, width, dst_height-height,
-				0);
+		                         dst_bpp, 0, height, width, dst_height - height,
+		                         0);
 		if (!pixman_ret) {
 			armsoc_bo_cpu_fini(pARMSOC->scanout, 0);
 			ERROR_MSG(
-					"Pixman failed to fill margin of scanout buffer");
+			    "Pixman failed to fill margin of scanout buffer");
 			goto exit;
 		}
 	}
@@ -487,18 +487,18 @@ static MODULESETUPPROTO(ARMSOCSetup);
 
 /** Provide basic version information to the XFree86 code. */
 static XF86ModuleVersionInfo ARMSOCVersRec = {
-		ARMSOC_DRIVER_NAME,
-		MODULEVENDORSTRING,
-		MODINFOSTRING1,
-		MODINFOSTRING2,
-		XORG_VERSION_CURRENT,
-		PACKAGE_VERSION_MAJOR,
-		PACKAGE_VERSION_MINOR,
-		PACKAGE_VERSION_PATCHLEVEL,
-		ABI_CLASS_VIDEODRV,
-		ABI_VIDEODRV_VERSION,
-		MOD_CLASS_VIDEODRV,
-		{0, 0, 0, 0}
+	ARMSOC_DRIVER_NAME,
+	MODULEVENDORSTRING,
+	MODINFOSTRING1,
+	MODINFOSTRING2,
+	XORG_VERSION_CURRENT,
+	PACKAGE_VERSION_MAJOR,
+	PACKAGE_VERSION_MINOR,
+	PACKAGE_VERSION_PATCHLEVEL,
+	ABI_CLASS_VIDEODRV,
+	ABI_VIDEODRV_VERSION,
+	MOD_CLASS_VIDEODRV,
+	{0, 0, 0, 0}
 };
 
 /** Let the XFree86 code know about the VersRec and Setup() function. */
@@ -572,7 +572,7 @@ ARMSOCProbe(DriverPtr drv, int flags)
 	numDevSections = xf86MatchDevice(ARMSOC_DRIVER_NAME, &devSections);
 	if (numDevSections <= 0) {
 		EARLY_ERROR_MSG(
-				"Did not find any matching device section in configuration file");
+		    "Did not find any matching device section in configuration file");
 		if (flags & PROBE_DETECT) {
 			/* if we are probing, assume one and lets see if we can
 			 * open the device to confirm it is there:
@@ -593,41 +593,41 @@ ARMSOCProbe(DriverPtr drv, int flags)
 
 			/* get the Bus ID */
 			busIdStr = xf86FindOptionValue(
-						devSections[i]->options,
-						"BusID");
+			               devSections[i]->options,
+			               "BusID");
 
 			/* get the DriverName */
 			driverNameStr = xf86FindOptionValue(
-					devSections[i]->options,
-					"DriverName");
+			                    devSections[i]->options,
+			                    "DriverName");
 
 			/* get the card_num from xorg.conf if present */
 			cardNumStr = xf86FindOptionValue(
-						devSections[i]->options,
-						"DRICard");
+			                 devSections[i]->options,
+			                 "DRICard");
 
 			if (busIdStr && driverNameStr) {
-					EARLY_WARNING_MSG(
-						"Option DriverName ignored (BusID is specified)");
+				EARLY_WARNING_MSG(
+				    "Option DriverName ignored (BusID is specified)");
 			}
 			if (busIdStr || driverNameStr) {
 				if (cardNumStr) {
 					EARLY_WARNING_MSG(
-						"Option DRICard ignored (BusID or DriverName are specified)");
+					    "Option DRICard ignored (BusID or DriverName are specified)");
 				}
 			}
 
 			if (busIdStr) {
 				if (0 == strlen(busIdStr)) {
 					EARLY_ERROR_MSG(
-						"Missing value for Option BusID");
+					    "Missing value for Option BusID");
 					return FALSE;
 				}
 				connection.bus_id = busIdStr;
 			} else if (driverNameStr) {
 				if (0 == strlen(driverNameStr)) {
 					EARLY_ERROR_MSG(
-						"Missing value for Option DriverName");
+					    "Missing value for Option DriverName");
 					return FALSE;
 				}
 				connection.driver_name = driverNameStr;
@@ -635,13 +635,13 @@ ARMSOCProbe(DriverPtr drv, int flags)
 				char *endptr;
 				errno = 0;
 				connection.card_num = strtol(cardNumStr,
-						&endptr, 10);
+				                             &endptr, 10);
 				if (('\0' == *cardNumStr) ||
-					('\0' != *endptr) ||
-					(errno != 0)) {
+				        ('\0' != *endptr) ||
+				        (errno != 0)) {
 					EARLY_ERROR_MSG(
-							"Bad Option DRICard value : %s",
-							cardNumStr);
+					    "Bad Option DRICard value : %s",
+					    cardNumStr);
 					return FALSE;
 				}
 			}
@@ -654,7 +654,7 @@ ARMSOCProbe(DriverPtr drv, int flags)
 			pScrn = xf86AllocateScreen(drv, 0);
 			if (!pScrn) {
 				EARLY_ERROR_MSG(
-						"Cannot allocate a ScrnInfoPtr");
+				    "Cannot allocate a ScrnInfoPtr");
 				drmClose(fd);
 				goto free_sections;
 			}
@@ -663,7 +663,7 @@ ARMSOCProbe(DriverPtr drv, int flags)
 			 * driverPrivate field.
 			 */
 			pScrn->driverPrivate =
-					calloc(1, sizeof(*pARMSOC));
+			    calloc(1, sizeof(*pARMSOC));
 			if (!pScrn->driverPrivate)
 				return FALSE;
 
@@ -677,7 +677,7 @@ ARMSOCProbe(DriverPtr drv, int flags)
 				 * directly
 				 */
 				xf86AddBusDeviceToConfigure(ARMSOC_DRIVER_NAME,
-						BUS_NONE, NULL, i);
+				                            BUS_NONE, NULL, i);
 				foundScreen = TRUE;
 				drmClose(fd);
 				continue;
@@ -685,7 +685,7 @@ ARMSOCProbe(DriverPtr drv, int flags)
 
 			if (devSections) {
 				int entity = xf86ClaimNoSlot(drv, 0,
-						devSections[i], TRUE);
+				                             devSections[i], TRUE);
 				xf86AddEntityToScreen(pScrn, entity);
 			}
 
@@ -696,8 +696,8 @@ ARMSOCProbe(DriverPtr drv, int flags)
 				pARMSOC->crtcNum = i;
 
 			xf86Msg(X_INFO, "Screen:%d,  CRTC:%d\n",
-					pScrn->scrnIndex,
-					pARMSOC->crtcNum);
+			        pScrn->scrnIndex,
+			        pARMSOC->crtcNum);
 
 			foundScreen = TRUE;
 
@@ -777,16 +777,16 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 
 	if (flags & PROBE_DETECT) {
 		ERROR_MSG(
-				"The %s driver does not support the \"-configure\" or \"-probe\" command line arguments.",
-				ARMSOC_NAME);
+		    "The %s driver does not support the \"-configure\" or \"-probe\" command line arguments.",
+		    ARMSOC_NAME);
 		return FALSE;
 	}
 
 	/* Check the number of entities, and fail if it isn't one. */
 	if (pScrn->numEntities != 1) {
 		ERROR_MSG(
-				"Driver expected 1 entity, but found %d for screen %d",
-				pScrn->numEntities, pScrn->scrnIndex);
+		    "Driver expected 1 entity, but found %d for screen %d",
+		    pScrn->numEntities, pScrn->scrnIndex);
 		return FALSE;
 	}
 
@@ -830,9 +830,9 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 	/* We don't support 8-bit depths: */
 	if (pScrn->depth < 16) {
 		ERROR_MSG(
-				"The requested default visual (%s) has an unsupported depth (%d).",
-				xf86GetVisualName(pScrn->defaultVisual),
-					pScrn->depth);
+		    "The requested default visual (%s) has an unsupported depth (%d).",
+		    xf86GetVisualName(pScrn->defaultVisual),
+		    pScrn->depth);
 		goto fail;
 	}
 
@@ -846,13 +846,13 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 		goto fail;
 
 	pARMSOC->drmmode_interface =
-			get_drmmode_implementation(pARMSOC->drmFD);
+	    get_drmmode_implementation(pARMSOC->drmFD);
 	if (!pARMSOC->drmmode_interface)
 		goto fail2;
 
 	/* create DRM device instance: */
 	pARMSOC->dev = armsoc_device_new(pARMSOC->drmFD,
-			pARMSOC->drmmode_interface->create_custom_gem);
+	                                 pARMSOC->drmmode_interface->create_custom_gem);
 
 	/* set chipset name: */
 	pScrn->chipset = (char *)ARMSOC_CHIPSET_NAME;
@@ -868,33 +868,38 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 
 	memcpy(pARMSOC->pOptionInfo, ARMSOCOptions, sizeof(ARMSOCOptions));
 	xf86ProcessOptions(pScrn->scrnIndex,
-			pARMSOC->pEntityInfo->device->options,
-			pARMSOC->pOptionInfo);
+	                   pARMSOC->pEntityInfo->device->options,
+	                   pARMSOC->pOptionInfo);
 
 	/* Determine if the user wants debug messages turned on: */
 	armsocDebug = xf86ReturnOptValBool(pARMSOC->pOptionInfo,
-					OPTION_DEBUG, FALSE);
+	                                   OPTION_DEBUG, FALSE);
 
 	if (!xf86GetOptValInteger(pARMSOC->pOptionInfo, OPTION_DRI_NUM_BUF,
-			&driNumBufs)) {
+	                          &driNumBufs)) {
 		/* Default to double buffering */
 		driNumBufs = 2;
 	}
 
 	if (driNumBufs < 2) {
 		ERROR_MSG(
-			"Invalid option for %s: %d. Must be greater than or equal to 2",
-			xf86TokenToOptName(pARMSOC->pOptionInfo,
-				OPTION_DRI_NUM_BUF),
-			driNumBufs);
+		    "Invalid option for %s: %d. Must be greater than or equal to 2",
+		    xf86TokenToOptName(pARMSOC->pOptionInfo,
+		                       OPTION_DRI_NUM_BUF),
+		    driNumBufs);
 		return FALSE;
 	}
 	pARMSOC->driNumBufs = driNumBufs;
 	/* Determine if user wants to disable buffer flipping: */
 	pARMSOC->NoFlip = xf86ReturnOptValBool(pARMSOC->pOptionInfo,
-			OPTION_NO_FLIP, FALSE);
+	                                       OPTION_NO_FLIP, FALSE);
 	INFO_MSG("Buffer Flipping is %s",
-				pARMSOC->NoFlip ? "Disabled" : "Enabled");
+	         pARMSOC->NoFlip ? "Disabled" : "Enabled");
+
+	pARMSOC->SoftExa = xf86ReturnOptValBool(pARMSOC->pOptionInfo,
+	                                        OPTION_SOFT_EXA, FALSE);
+	INFO_MSG("Hardware EXA is %s",
+	         pARMSOC->SoftExa ? "Disabled" : "Enabled");
 
 	/*
 	 * Select the video modes:
@@ -907,7 +912,7 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 
 	/* Do initial KMS setup: */
 	if (!drmmode_pre_init(pScrn, pARMSOC->drmFD,
-			(pScrn->bitsPerPixel >> 3))) {
+	                      (pScrn->bitsPerPixel >> 3))) {
 		ERROR_MSG("Cannot get KMS resources");
 		goto fail2;
 	} else {
@@ -927,16 +932,16 @@ ARMSOCPreInit(ScrnInfoPtr pScrn, int flags)
 		break;
 	default:
 		ERROR_MSG(
-				"The requested number of bits per pixel (%d) is unsupported.",
-				pScrn->bitsPerPixel);
+		    "The requested number of bits per pixel (%d) is unsupported.",
+		    pScrn->bitsPerPixel);
 		goto fail2;
 	}
 
 	/* Load external sub-modules now: */
-	if (!(xf86LoadSubModule(pScrn, "dri2") && 
-		xf86LoadSubModule(pScrn, "dri3") &&
-			xf86LoadSubModule(pScrn, "exa") &&
-			xf86LoadSubModule(pScrn, "fb"))) {
+	if (!(xf86LoadSubModule(pScrn, "dri2") &&
+	        xf86LoadSubModule(pScrn, "dri3") &&
+	        xf86LoadSubModule(pScrn, "exa") &&
+	        xf86LoadSubModule(pScrn, "fb"))) {
 		goto fail2;
 	}
 
@@ -963,12 +968,14 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
-	if (!pARMSOC->pARMSOCEXA)
-		pARMSOC->pARMSOCEXA = InitViv2DEXA(pScreen, pScrn,
-								pARMSOC->drmFD);
+	if (!pARMSOC->SoftExa) {
+		if (!pARMSOC->pARMSOCEXA)
+			pARMSOC->pARMSOCEXA = InitViv2DEXA(pScreen, pScrn,
+			                                   pARMSOC->drmFD);
+	}
 	if (!pARMSOC->pARMSOCEXA)
 		pARMSOC->pARMSOCEXA = InitNullEXA(pScreen, pScrn,
-								pARMSOC->drmFD);
+		                                  pARMSOC->drmFD);
 	if (pARMSOC->pARMSOCEXA) {
 		pARMSOC->dri2 = ARMSOCDRI2ScreenInit(pScreen); // DRI2
 		pARMSOC->dri3 = ARMSOCDRI3ScreenInit(pScreen); // DRI3
@@ -976,7 +983,7 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 		ARMSOCVideoScreenInit(pScreen); // XV
 	} else {
 		pARMSOC->dri2 = FALSE;
-		pARMSOC->dri3 = FALSE;		
+		pARMSOC->dri3 = FALSE;
 	}
 }
 
@@ -1021,19 +1028,19 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 
 	/* Allocate initial scanout buffer.*/
 	DEBUG_MSG("allocating new scanout buffer: %dx%d %d %d",
-			pScrn->virtualX, pScrn->virtualY,
-			depth, pScrn->bitsPerPixel);
+	          pScrn->virtualX, pScrn->virtualY,
+	          depth, pScrn->bitsPerPixel);
 	assert(!pARMSOC->scanout);
 	/* Screen creates and takes a ref on the scanout bo */
 	pARMSOC->scanout = armsoc_bo_new_with_dim(pARMSOC->dev, pScrn->virtualX,
-			pScrn->virtualY, depth, pScrn->bitsPerPixel,
-			ARMSOC_BO_SCANOUT);
+	                   pScrn->virtualY, depth, pScrn->bitsPerPixel,
+	                   ARMSOC_BO_SCANOUT);
 	if (!pARMSOC->scanout) {
 		ERROR_MSG("Cannot allocate scanout buffer\n");
 		goto fail1;
 	}
 	pScrn->displayWidth = armsoc_bo_pitch(pARMSOC->scanout) /
-			((pScrn->bitsPerPixel+7) / 8);
+	                      ((pScrn->bitsPerPixel + 7) / 8);
 	xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
 
 	/* need to point to new screen on server regeneration */
@@ -1058,12 +1065,12 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	miClearVisualTypes();
 
 	if (!miSetVisualTypes(depth,
-			miGetDefaultVisualMask(depth),
-			pScrn->rgbBits, pScrn->defaultVisual)) {
+	                      miGetDefaultVisualMask(depth),
+	                      pScrn->rgbBits, pScrn->defaultVisual)) {
 		ERROR_MSG(
-				"Cannot initialize the visual type for %d depth, %d bits per pixel!",
-				depth,
-				pScrn->bitsPerPixel);
+		    "Cannot initialize the visual type for %d depth, %d bits per pixel!",
+		    depth,
+		    pScrn->bitsPerPixel);
 		goto fail2;
 	}
 
@@ -1074,9 +1081,9 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 
 	/* Initialize some generic 2D drawing functions: */
 	if (!fbScreenInit(pScreen, armsoc_bo_map(pARMSOC->scanout),
-			pScrn->virtualX, pScrn->virtualY,
-			pScrn->xDpi, pScrn->yDpi, pScrn->displayWidth,
-			pScrn->bitsPerPixel)) {
+	                  pScrn->virtualX, pScrn->virtualY,
+	                  pScrn->xDpi, pScrn->yDpi, pScrn->displayWidth,
+	                  pScrn->bitsPerPixel)) {
 		ERROR_MSG("fbScreenInit() failed!");
 		goto fail3;
 	}
@@ -1117,7 +1124,7 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	xf86SetBackingStore(pScreen);
 
 	fbdev = xf86GetOptValString(pARMSOC->pOptionInfo,
-			OPTION_INIT_FROM_FBDEV);
+	                            OPTION_INIT_FROM_FBDEV);
 	if (fbdev && *fbdev != '\0') {
 		if (ARMSOCCopyFB(pScrn, fbdev)) {
 			/* Only allow None BG root if we initialized the scanout
@@ -1161,7 +1168,7 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	}
 
 	if (!xf86HandleColormaps(pScreen, 1 << pScrn->rgbBits, pScrn->rgbBits,
-			ARMSOCLoadPalette, NULL, CMAP_PALETTED_TRUECOLOR)) {
+	                         ARMSOCLoadPalette, NULL, CMAP_PALETTED_TRUECOLOR)) {
 		ERROR_MSG("xf86HandleColormaps() failed!");
 		goto fail8;
 	}
@@ -1174,14 +1181,14 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
 	/* Wrap some screen functions: */
 	wrap(pARMSOC, pScreen, CloseScreen, ARMSOCCloseScreen);
 	wrap(pARMSOC, pScreen, CreateScreenResources,
-			ARMSOCCreateScreenResources);
+	     ARMSOCCreateScreenResources);
 	wrap(pARMSOC, pScreen, BlockHandler, ARMSOCBlockHandler);
 	drmmode_screen_init(pScrn);
 
 	TRACE_EXIT();
 	return TRUE;
 
-/* cleanup on failures */
+	/* cleanup on failures */
 fail8:
 	/* uninstall the default colormap */
 	miUninstallColormap(GetInstalledmiColormap(pScreen));
@@ -1232,7 +1239,7 @@ fail:
 
 static void
 ARMSOCLoadPalette(ScrnInfoPtr pScrn, int numColors, int *indices,
-		LOCO *colors, VisualPtr pVisual)
+                  LOCO *colors, VisualPtr pVisual)
 {
 	TRACE_ENTER();
 	TRACE_EXIT();
@@ -1442,7 +1449,7 @@ ARMSOCFreeScreen(FREE_SCREEN_ARGS_DECL)
 	if (pARMSOC->pARMSOCEXA) {
 		if (pARMSOC->pARMSOCEXA->FreeScreen)
 			pARMSOC->pARMSOCEXA->FreeScreen(
-					FREE_SCREEN_ARGS(pScrn));
+			    FREE_SCREEN_ARGS(pScrn));
 	}
 
 	armsoc_device_del(pARMSOC->dev);

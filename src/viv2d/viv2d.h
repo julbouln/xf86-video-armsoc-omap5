@@ -10,13 +10,7 @@
 #include "state_2d.xml.h"
 #include "cmdstream.xml.h"
 
-#define VIV2D_STREAM_SIZE 1024*4
-#define VIV2D_MAX_RECTS 256
-#define VIV2D_MAX_TMP_PIX 1024
-#define VIV2D_PITCH_ALIGN 32
-
-#define VIV2D_CACHE_BO 1
-#define VIV2D_CACHE_SIZE 1024*4
+#include "viv2d_config.h"
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
@@ -25,11 +19,11 @@
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
 */
-#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
-/*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
+//#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
 		do { xf86Msg(X_WARNING, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-*/
+
 //#define VIV2D_INFO_MSG(fmt, ...)
 #define VIV2D_INFO_MSG(fmt, ...) \
 		do { xf86Msg(X_INFO, fmt "\n",\

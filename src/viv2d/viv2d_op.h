@@ -149,6 +149,9 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 			Viv2DPixmapPrivPtr tmp;
 			v2d->tmp_pix_cnt--;
 			tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
+
+//			etnaviv_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
+
 			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d", tmp->bo, v2d->tmp_pix_cnt);
 #ifdef VIV2D_CACHE_BO
 			Viv2DCacheDelBo(v2d, tmp->bo);
@@ -175,7 +178,6 @@ static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 
 	if (!async) {
 		_Viv2DStreamWait(v2d);
-		_Viv2OpClearTmpPix(v2d);
 	}
 }
 
@@ -195,6 +197,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix achieved %d %d", v2d->tmp_pix_cnt, v2d->stream->offset);
 		_Viv2DStreamCommit(v2d, FALSE);
+		_Viv2OpClearTmpPix(v2d);
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix commit %d", v2d->tmp_pix_cnt);
 	}
 

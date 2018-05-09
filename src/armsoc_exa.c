@@ -39,7 +39,7 @@
 //#define ARMSOC_BO_MIN_SIZE 0
 
 Bool
-is_accel_pixmap(struct ARMSOCPixmapPrivRec *priv, int size)
+IsDumbPixmap(struct ARMSOCPixmapPrivRec *priv, int size)
 {
 	/* For pixmaps that are scanout or backing for windows, we
 	 * "accelerate" them by allocating them via GEM. For all other
@@ -92,7 +92,7 @@ ARMSOCPixmapExchange(PixmapPtr a, PixmapPtr b)
 }
 
 static void *
-CreateUnAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
+CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
                     int depth, int bitsPerPixel,
                     int *new_fb_pitch)
 {
@@ -115,7 +115,7 @@ CreateUnAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int wid
 }
 
 static void *
-CreateAccelPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
+CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
                   int depth, int bitsPerPixel,
                   int *new_fb_pitch)
 {
@@ -180,10 +180,10 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 	}
 	priv->usage_hint = usage_hint;
 
-	if (is_accel_pixmap(priv, width * height * (bitsPerPixel / 8)))
-		return CreateAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
+		return CreateDumbPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
 	else
-		return CreateUnAccelPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+		return CreateExaPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
 }
 
 _X_EXPORT void
@@ -213,7 +213,7 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 
 
 static Bool
-ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
+ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
                           int depth, int bitsPerPixel, int devKind,
                           pointer pPixData)
 {
@@ -235,7 +235,6 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 	 */
 	if (pPixData && pPixData != priv->buf.buf) {
 		if (priv->buf.buf) {
-//			INFO_MSG("FreeBuf modify (diff buf) %p", &priv->buf);
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 		}
 
@@ -272,7 +271,6 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 	if (!priv->buf.buf || priv->buf.size != size) {
 		/* re-allocate buffer! */
 		if (priv->buf.buf) {
-//			INFO_MSG("FreeBuf modify (diff size or no buf) %p", &priv->buf);
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 		}
 
@@ -294,7 +292,7 @@ ModifyUnAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, i
 
 
 static Bool
-ModifyAccelPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
+ModifyDumbPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
                         int depth, int bitsPerPixel, int devKind,
                         pointer pPixData)
 {
@@ -412,10 +410,10 @@ ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
                          pointer pPixData)
 {
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
-	if (is_accel_pixmap(priv, width * height * (bitsPerPixel / 8)))
-		return ModifyAccelPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
+	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
+		return ModifyDumbPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
 	else
-		return ModifyUnAccelPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
+		return ModifyExaPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
 }
 
 /**
@@ -482,7 +480,7 @@ static inline enum armsoc_gem_op idx2op(int index)
 {
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
 
-	if (!is_accel_pixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8))) {
+	if (!IsDumbPixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8))) {
 		pPixmap->devPrivate.ptr = priv->buf.buf;
 		return TRUE;
 	}
@@ -536,7 +534,7 @@ ARMSOCFinishAccess(PixmapPtr pPixmap, int index)
 	 * buffer was accessed by sw, and pass that info down to kernel to
 	 * do a more precise cache flush..
 	 */
-	if (is_accel_pixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8)))
+	if (IsDumbPixmap(priv, pPixmap->drawable.width * pPixmap->drawable.height * (pPixmap->drawable.bitsPerPixel / 8)))
 		armsoc_bo_cpu_fini(priv->bo, idx2op(index));
 }
 

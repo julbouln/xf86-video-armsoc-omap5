@@ -50,38 +50,7 @@
 #include "viv2d_exa.h"
 #include "viv2d_op.h"
 
-#define VIV2D_MARKER 1
-#define VIV2D_PIXMAP 1
-#define VIV2D_ACCESS 1
-
-#define VIV2D_SOLID 1
-#define VIV2D_COPY 1
-#define VIV2D_COMPOSITE 1
-#define VIV2D_PUT_TEXTURE_IMAGE 1
-
-#define VIV2D_UPLOAD_TO_SCREEN 1
-#define VIV2D_DOWNLOAD_FROM_SCREEN 1
-
-#define VIV2D_MASK_SUPPORT 1 // support mask
-#define VIV2D_SOLID_PICTURE 1 // support solid clear picture
-#define VIV2D_REPEAT 1 // support repeat
-#define VIV2D_REPEAT_WITH_MASK 1 // support repeat with mask
-//#define VIV2D_1X1_REPEAT_AS_SOLID 1 // use solid clear instead of stretch for 1x1 repeat
-#define VIV2D_SUPPORT_A8_SRC 1
-#define VIV2D_SUPPORT_A8_MASK 1
-
-//#define VIV2D_SUPPORT_A8_DST 1
-//#define VIV2D_SUPPORT_MONO 1
-
-//#define VIV2D_USERPTR 1
-
-//#define VIV2D_MIN_SIZE 0
-#define VIV2D_MIN_SIZE 1024 // > 16x16 32bpp
-
-//#define VIV2D_SIZE_CONSTRAINTS 1
-//#define VIV2D_MIN_HW_HEIGHT 64
-//#define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
-//#define VIV2D_MIN_HW_SIZE_24BIT (4096)
+#include "viv2d_config.h"
 
 static Viv2DBlendOp viv2d_blend_op[] = {
 	{PictOpClear,			DE_BLENDMODE_ZERO, 				DE_BLENDMODE_ZERO},
@@ -367,15 +336,16 @@ static int Viv2DMarkSync(ScreenPtr pScreen)
 
 static void Viv2DWaitMarker(ScreenPtr pScreen, int marker)
 {
+#if 0
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
 
 	VIV2D_DBG_MSG("Viv2DWaitMarker %d %d", marker, v2d->stream->offset);
 
-//	_Viv2DStreamWait(v2d);
-//	_Viv2OpClearTmpPix(v2d);
-
+	_Viv2DStreamWait(v2d);
+	_Viv2OpClearTmpPix(v2d);
+#endif
 }
 
 /**
@@ -419,15 +389,12 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 
 	VIV2D_DBG_MSG("Viv2DPrepareAccess %p (%dx%d) %d (%d)", pPixmap, pix->width, pix->height, index, pix->refcnt);
 
-//	if (pix->bo) {
-//		etnaviv_bo_wait(v2d, pix->bo);
-//	}
-
 	// only if pixmap has been used
 	if (pix->refcnt > 0) {
+		_Viv2DStreamCommit(v2d, TRUE);
 		// flush if remaining state
 		if (pix->bo) {
-			_Viv2DStreamCommit(v2d, FALSE);
+			etna_bo_cpu_prep(pix->bo, idx2op(index));
 		}
 		pix->refcnt = -1;
 	}
@@ -532,6 +499,7 @@ static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 #endif
 		struct etna_bo *bo = (struct etna_bo *)buf->priv;
 #ifdef VIV2D_USERPTR
+		etnaviv_bo_wait(v2d->dev, v2d->pipe, bo);
 		if (etna_bo_map(bo) != buf->buf)
 			free(buf->buf);
 #endif
@@ -566,7 +534,14 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int b
 //		buf->buf = malloc_aligned(PAGE_SIZE, PAGE_ALIGN(size));
 		buf->buf = aligned_alloc(PAGE_SIZE, PAGE_ALIGN(size));
 //		posix_memalign(&buf->buf, PAGE_SIZE, size);
-		bo = etna_bo_from_usermem_prot(v2d->dev, buf->buf, PAGE_ALIGN(size));
+		if (PAGE_ALIGN(size) < 16384) {
+			bo = etna_bo_from_usermem_prot(v2d->dev, buf->buf, PAGE_ALIGN(size));
+		} else {
+			bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
+			free(buf->buf);
+			buf->buf = (void *)etna_bo_map(bo);
+		}
+//		bo = etna_bo_from_usermem_prot(v2d->dev, buf->buf, PAGE_ALIGN(size));
 		if (!bo) {
 			// fail fallback to normal bo
 			VIV2D_INFO_MSG("Viv2DAllocBuf: bo from usermem failed, create standard bo");
@@ -713,8 +688,7 @@ extern void* neon_memcpy(void* dest, const void* source, unsigned int numBytes);
 
 #ifdef VIV2D_UPLOAD_TO_SCREEN
 static Bool Viv2DUploadToScreen(PixmapPtr pDst,
-                                int x,
-                                int y, int w, int h, char *src, int src_pitch) {
+                                int x, int y, int w, int h, char *src, int src_pitch) {
 	ScrnInfoPtr pScrn = pix2scrn(pDst);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
@@ -789,9 +763,11 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamCommit(v2d, TRUE);
 	exaMarkSync(pDst->drawable.pScreen);
 
-	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d", pDst, etna_bo_map(dst->bo), src, src_pitch, tmp->pitch, x, y, w, h,
-	              pDst->drawable.width, pDst->drawable.height,
-	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
+	               pDst, etna_bo_map(dst->bo),
+	               src, src_pitch, tmp->pitch, x, y, w, h,
+	               pDst->drawable.width, pDst->drawable.height,
+	               pDst->drawable.depth, pDst->drawable.bitsPerPixel);
 
 	return TRUE;
 }
@@ -845,15 +821,18 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	if (w * h < 4)
 		return FALSE;
 
+	if (!src->bo)
+		return FALSE;
+
 	if (!Viv2DSetFormat(pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, &src->format)) {
-		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported src format %d/%d %p", pDst->drawable.depth, pDst->drawable.bitsPerPixel, src);
+		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported src format %d/%d %p", pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, src);
 		return FALSE;
 	}
 
 	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pSrc->drawable.bitsPerPixel);
 
 	if (!Viv2DSetFormat(pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, &tmp->format)) {
-		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported format %d/%d %p", pDst->drawable.depth, pDst->drawable.bitsPerPixel, src);
+		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported format %d/%d %p", pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, src);
 		return FALSE;
 	}
 
@@ -1321,7 +1300,7 @@ Viv2DCheckComposite (int op,
 
 		if (sp->type == SourcePictTypeSolidFill) {
 		} else {
-			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported src is not a drawable : %d", sp->type);
+			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite unsupported src is not a solid fill drawable : %d", sp->type);
 			return FALSE;
 		}
 #else
