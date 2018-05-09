@@ -1,549 +1,500 @@
-/* neon-memcpy.S
- Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
-
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions are met:
-     * Redistributions of source code must retain the above copyright
-       notice, this list of conditions and the following disclaimer.
-     * Redistributions in binary form must reproduce the above copyright
-       notice, this list of conditions and the following disclaimer in the
-       documentation and/or other materials provided with the distribution.
-     * Neither the name of Code Aurora nor the names of its contributors may
-       be used to endorse or promote products derived from this software
-       without specific prior written permission.
-
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- POSSIBILITY OF SUCH DAMAGE.
- ***************************************************************************/
-
-/***************************************************************************
-  Neon memcpy: Attempts to do a memcpy with Neon registers if possible,
-     Inputs:
-        dest: The destination buffer
-        src: The source buffer
-        n: The size of the buffer to transfer
-     Outputs:
-
-***************************************************************************/
-
 /*
- * General note:
- * The original code that was compiled for rvct used PUSH/POP and VPUSH/VPOP
- * However, it looks like the 2006 CodeSourcery Assembler has issues generating
- * the correct object code for VPOP, resulting in horrific stack crashes.
- * As a result, I've temporarily move PUSH->STMDB, POP->LDMIA, VPUSH->VSTMDB,
- * and VPOP->VLDMIA.  We can revert this back once we update our toolchain.
+ * Copyright (C) 2008 The Android Open Source Project
+ * All rights reserved.
+ * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
- * Also, VSHL swaps the source register and the shift-amount register
- * around in 2006-q3.  I've coded this incorrectly so it turns out correct
- * in the object code, but we'll need to undo that later...
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
-	.code 32
-	.align 4
-	.globl neon_memcpy
-	.func
+#if __ARM_ARCH__ == 7 || defined(__ARM_NEON__)
+
+        .text
+        .fpu    neon
+
+        .global neon_memcpy
+        .type neon_memcpy, %function
+        .align 4
+
+/* a prefetch distance of 4 cache-lines works best experimentally */
+#define CACHE_LINE_SIZE     32
+#define PREFETCH_DISTANCE   (CACHE_LINE_SIZE*4)
 
 neon_memcpy:
-	/*
-	 * First, make sure we're not copying < 4 bytes.  If so, we'll
-         * just handle it here.
-	 */
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	stmdb		sp!, {r0}
-#else
-	push		{r0}
-#endif
-	cmp		r2, #4
-	bgt		neon_gt_4
-	/* Copy 0-4 bytes, if needed, and return.*/
-	cmp		r2, #0
-neon_smallcopy_loop:
-	beq		neon_smallcopy_done
-	ldrb		r12, [r1], #1
-	subs		r2, r2, #1
-	strb		r12, [r0], #1
-	b		neon_smallcopy_loop
-neon_smallcopy_done:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	ldmia		sp!, {r0}
-#else
-	pop		{r0}
-#endif
-	bx		lr
+        .fnstart
+        .save       {r0, lr}
+        stmfd       sp!, {r0, lr}
 
-	/* Copy 4 or more bytes*/
-neon_gt_4:
-	/* Preload what we can...*/
-	pld		[r0,#0]
-	pld		[r1,#0]
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	stmdb		sp!, {r4-r5}
-#else
-	push		{r4-r5}
-#endif
+        /* start preloading as early as possible */
+        pld         [r1, #(CACHE_LINE_SIZE*0)]
+        pld         [r1, #(CACHE_LINE_SIZE*1)]
 
-neon_check_align:
-	/* Check normal word alignment for target. */
-	ands		r12, r0, #0x3
-	beq		source_alignment_check
+        /* do we have at least 16-bytes to copy (needed for alignment below) */
+        cmp         r2, #16
+        blo         5f
 
-	/*
-	 * Target is not aligned.  Step through until we get that
-	 * word-aligned.  This works better than a loop, according
-	 * to our pipeline modeler.
-	 */
-	cmp		r12, #2
-	ldrb		r3, [r1], #1
-	ldrleb		r4, [r1], #1
-	ldrltb		r5, [r1], #1
-	rsb		r12, r12, #4
-	sub		r2, r2, r12
-	strb		r3, [r0], #1
-	strleb		r4, [r0], #1
-	strltb		r5, [r0], #1
+        /* align destination to half cache-line for the write-buffer */
+        rsb         r3, r0, #0
+        ands        r3, r3, #0xF
+        beq         0f
 
-source_alignment_check:
-	ands		r12, r1, #0x3
-	bne		neon_memcpy_nonaligned	/* Source is not word aligned.*/
-neon_try_16_align:
-	cmp		r2, #64
-	blt		neon_align_route
-	/* This is where we try 16-byte alignment. */
-	ands		r12, r0, #0xf
-	beq		neon_align_route
-	rsb		r12, r12, #16
-neon_16_start:
-	sub		r2, r2, r12
-	lsrs		r3, r12, #2
-neon_align_16_4:
-	ldr		r4, [r1], #4
-	subs		r3, r3, #1
-	str		r4, [r0], #4
-	bne		neon_align_16_4
-neon_align_route:
-	/* In this case, both source and target are word-aligned. */
-	cmp		r2, #32768
-	bge		neon_copy_128p_a
-	cmp		r2, #256
-	bge		neon_copy_128_a
-	cmp		r2, #64
-	bge		neon_copy_32_a
-	b		neon_copy_finish_a
-	nop
-neon_copy_128p_a:
-	/* We'll copy blocks 128-bytes at a time, but try to call pld to
-	 * load in the next page, if possible.
-	 */
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vstmdb		sp!, {q4-q7}
-#else
-	vpush		{q4-q7}
-#endif
-	mov		r12, r2, lsr #7
-neon_copy_128p_loop_a:
-	vld1.32		{q0, q1}, [r1]!
-	vld1.32		{q2, q3}, [r1]!
-	vld1.32		{q4, q5}, [r1]!
-	vld1.32		{q6, q7}, [r1]!
-	pld		[r1, #0]
-	pld		[r1, #1024]
-	vst1.32		{q0, q1}, [r0]!
-	vst1.32		{q2, q3}, [r0]!
-	vst1.32		{q4, q5}, [r0]!
-	vst1.32		{q6, q7}, [r0]!
-	subs		r12, r12, #1
-	bne		neon_copy_128p_loop_a
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vldmia		sp!, {q4-q7}
-#else
-	vpop		{q4-q7}
-#endif
-	ands		r2, r2, #0x7f
-	beq		neon_end
-	cmp		r2, #32
-	blt		neon_copy_finish_a
-	b		neon_copy_32_a
-	/* Copy blocks of 128-bytes (word-aligned) at a time*/
-neon_copy_128_a:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vstmdb		sp!, {q4-q7}
-#else
-	vpush		{q4-q7}
-#endif
-	/*
-	 * Move to a 1-s based countdown to determine when to loop.  That
-	 * allows the subs to set the Z flag without having to explicitly
-	 * call cmp to a value.
-	 */
-	mov		r12, r2, lsr #7
-neon_copy_128_loop_a:
-	vld1.32		{q0, q1}, [r1]!
-	vld1.32		{q2, q3}, [r1]!
-	vld1.32		{q4, q5}, [r1]!
-	vld1.32		{q6, q7}, [r1]!
-	pld		[r1, #0]
-	pld		[r1, #128]
-	vst1.32		{q0, q1}, [r0]!
-	vst1.32		{q2, q3}, [r0]!
-	vst1.32		{q4, q5}, [r0]!
-	vst1.32		{q6, q7}, [r0]!
-	subs		r12, r12, #1
-	pld		[r0, #0]
-	pld		[r0, #128]
-	bne		neon_copy_128_loop_a
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vldmia		sp!, {q4-q7}
-#else
-	vpop		{q4-q7}
-#endif
-	ands		r2, r2, #0x7f
-	beq		neon_end
-	cmp		r2, #32
-	blt		neon_copy_finish_a
-	/* Copy blocks of 32-bytes (word aligned) at a time*/
-neon_copy_32_a:
-	mov		r12, r2, lsr #5
-neon_copy_32_loop_a:
-	vld1.32		{q0,q1}, [r1]!
-	subs		r12, r12, #1
-	pld		[r1,#0]
-	vst1.32		{q0,q1}, [r0]!
-	bne		neon_copy_32_loop_a
-	ands		r2, r2, #0x1f
-	beq		neon_end
-neon_copy_finish_a:
-neon_copy_16_a:
-	movs		r12, r2, lsr #4
-	beq		neon_copy_8_a
-neon_copy_16_a_loop:
-	vld1.32		{q0}, [r1]!
-	subs		r12, r12, #1
-	vst1.32		{q0}, [r0]!
-	bne		neon_copy_16_a_loop
-	ands		r2, r2, #0xf
-	beq		neon_end
-neon_copy_8_a:
-	cmp		r2, #8
-	blt		neon_copy_4_a
-	ldm		r1!, {r4-r5}
-	subs		r2, r2, #8
-	stm		r0!, {r4-r5}
-	/* Copy 4-bytes of word-aligned data at a time*/
-neon_copy_4_a:
-	cmp		r2, #4
-	blt		neon_copy_finish
-	ldr		r4, [r1], #4
-	subs		r2, r2, #4
-	str		r4, [r0], #4
-	b		neon_copy_finish
+        /* copy up to 15-bytes (count in r3) */
+        sub         r2, r2, r3
+        movs        ip, r3, lsl #31
+        ldrmib      lr, [r1], #1
+        strmib      lr, [r0], #1
+        ldrcsb      ip, [r1], #1
+        ldrcsb      lr, [r1], #1
+        strcsb      ip, [r0], #1
+        strcsb      lr, [r0], #1
+        movs        ip, r3, lsl #29
+        bge         1f
+        // copies 4 bytes, destination 32-bits aligned
+        vld4.8      {d0[0], d1[0], d2[0], d3[0]}, [r1]!
+        vst4.8      {d0[0], d1[0], d2[0], d3[0]}, [r0, :32]!
+1:      bcc         2f
+        // copies 8 bytes, destination 64-bits aligned
+        vld1.8      {d0}, [r1]!
+        vst1.8      {d0}, [r0, :64]!
+2:
 
-	/*
-	 * Handle unaligned data.  The basic concept here is that we'll
-	 * try to pull out enough data from the source to get that word-
-	 * aligned, then do our writes word-aligned, storing the difference
-	 * in a register, and shifting the data as needed.
-	 */
-neon_memcpy_nonaligned:
-	/*
-	 * If this is <8 bytes, it makes more sense to just copy it
-	 * quickly instead of incurring all kinds of overhead.
-	 */
-	cmp		r2, #8 /* Let's try this...*/
-	ble		neon_copy_finish
-	/*
-	 * This is where we'll pull out either 1, 2, or 3 bytes of data
-	 * from the source as needed to align it, then store off those
-	 * bytes in r4.  When we read in the (now) aligned data from the
-	 * source, we'll shift the bytes and AND in the r4 data, then write
-	 * to the target aligned.
-	 *
-	 * The conditional ldr calls work slightly faster than the
-	 * previous method, confirmed by our pipeline modeler.
-	 */
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	stmdb		sp!, {r6-r9}
-#else
-	push		{r6-r9}
-#endif
-	cmp		r12, #2
-	ldrb		r4, [r1], #1
-	ldrleb		r5, [r1], #1
-	ldrltb		r6, [r1], #1
-	rsb		r8, r12, #4
-	sub		r2, r2, r8
-	lsl		r8, r8, #3
-	orrle		r4, r4, r5, lsl #8
-	orrlt		r4, r4, r6, lsl #16
-	rsb		r9, r8, #32
+0:      /* preload immediately the next cache line, which we may need */
+        pld         [r1, #(CACHE_LINE_SIZE*0)]
+        pld         [r1, #(CACHE_LINE_SIZE*1)]
 
-	cmp		r2, #64
-	blt		neon_unaligned_route
-	ands		r12, r0, #0xf
-	beq		neon_unaligned_route
-	rsb		r12, r12, #16
-neon_16_start_u:
-	sub		r2, r2, r12
-	lsrs		r6, r12, #2
-neon_align_16_4_u:
-	ldr		r5, [r1], #4
-	subs		r6, r6, #1
-	orr		r4, r4, r5, lsl r8
-	str		r4, [r0], #4
-	mov		r4, r5, lsr r9
-	bne		neon_align_16_4_u
-neon_unaligned_route:
-	/* Decide which loop block to branch to.*/
-	cmp		r2, #256
-	bge		neon_copy_64_u
-	cmp		r2, #64
-	bge		neon_copy_32_u
-	b		neon_copy_finish_u
-	/* Copy data in 64-byte blocks.*/
-neon_copy_64_u:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vstmdb		sp!, {q4}
-	vstmdb		sp!, {q5-q8}
-#else
-	vpush		{q4}
-	vpush		{q5-q8}
-#endif
-	/* We'll need this for the q register shift later.*/
-	vdup.u32	q8, r8
-	/*
-	 * As above, we determine how many times we can go through the
-	 * 64-byte copy loop, then countdown.
-	 */
-	mov		r12, r2, lsr #6
-	and		r2, r2, #0x3f
-neon_copy_64_u_loop:
-	/* Load 64-bytes into q4-q7.*/
-	vld1.32		{q4, q5}, [r1]!
-	vld1.32		{q6, q7}, [r1]!
-	/*
-	 * Shift q0-q3 right so everything but the data we need due to the
-	 * alignment falls off the right-hand side.  The branching
-	 * is needed, since vshr requires the shift to be an immediate
-	 * value.
-	 */
-	lsls		r5, r8, #28
-	bcc		neon_copy_64_u_b8
-	bpl		neon_copy_64_u_b16
-	vshr.u64	q0, q4, #40
-	vshr.u64	q1, q5, #40
-	vshr.u64	q2, q6, #40
-	vshr.u64	q3, q7, #40
-	b		neon_copy_64_unify
-neon_copy_64_u_b8:
-	vshr.u64	q0, q4, #56
-	vshr.u64	q1, q5, #56
-	vshr.u64	q2, q6, #56
-	vshr.u64	q3, q7, #56
-	b		neon_copy_64_unify
-neon_copy_64_u_b16:
-	vshr.u64	q0, q4, #48
-	vshr.u64	q1, q5, #48
-	vshr.u64	q2, q6, #48
-	vshr.u64	q3, q7, #48
-neon_copy_64_unify:
-	/*
-	 * Shift q4-q7 left by r8 bits to take the alignment into
-	 * account.
-	 */
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vshl.u64	q4, q8, q4
-	vshl.u64	q5, q8, q5
-	vshl.u64	q6, q8, q6
-	vshl.u64	q7, q8, q7
-#else
-	vshl.u64	q4, q4, q8
-	vshl.u64	q5, q5, q8
-	vshl.u64	q6, q6, q8
-	vshl.u64	q7, q7, q8
-#endif
-	/*
-	 * The data in s14 will be needed for the next loop iteration.  Move
-	 * that to r5.
-	 */
-	vmov		r5, s14
-	/* We'll vorr the shifted data with the data that needs to move back.*/
-	vorr		d9, d9, d0
-	/* Copy the data from the previous loop into s14.*/
-	vmov		s14, r4
-	vorr		d10, d10, d1
-	vorr		d11, d11, d2
-	vorr		d12, d12, d3
-	vorr		d13, d13, d4
-	vorr		d14, d14, d5
-	vorr		d15, d15, d6
-	vorr		d8, d8, d7
-	subs		r12, r12, #1
-	pld		[r1, #0]
-	pld		[r1, #128]
-	/* Save off the r5 data into r4 for the next iteration.*/
-	mov		r4, r5
-	vst1.32		{q4, q5}, [r0]!
-	vst1.32		{q6, q7}, [r0]!
-	pld		[r0, #0]
-	pld		[r0, #128]
-	bne		neon_copy_64_u_loop
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vldmia		sp!, {q5-q8}
-	vldmia		sp!, {q4}
-#else
-	vpop		{q5-q8}
-	vpop		{q4}
-#endif
-	cmp		r2, #32
-	bge		neon_copy_32_u
-	b		neon_copy_finish_u
-neon_copy_32_u:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vstmdb		sp!, {q4}
-#else
-	vpush		{q4}
-#endif
-	vdup.u32	q4, r8
-	mov		r12, r2, lsr #5
-	and		r2, r2, #0x1f
-neon_copy_32_u_loop:
-	vld1.32		{q0, q1}, [r1]!
-	lsls		r5, r8, #28
-	bcc		neon_copy_32_u_b8
-	bpl		neon_copy_32_u_b16
-	vshr.u64	q2, q0, #40
-	vshr.u64	q3, q1, #40
-	b		neon_copy_32_unify
-neon_copy_32_u_b8:
-	vshr.u64	q2, q0, #56
-	vshr.u64	q3, q1, #56
-	b		neon_copy_32_unify
-neon_copy_32_u_b16:
-	vshr.u64	q2, q0, #48
-	vshr.u64	q3, q1, #48
-neon_copy_32_unify:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vshl.u64	q0, q4, q0
-	vshl.u64	q1, q4, q1
-#else
-	vshl.u64	q0, q0, q4
-	vshl.u64	q1, q1, q4
-#endif
-	vmov		r5, s14
-	vorr		d1, d1, d4
-	vmov		s14, r4
-	vorr		d2, d2, d5
-	vorr		d3, d3, d6
-	vorr		d0, d0, d7
-	subs		r12, r12, #1
-	pld		[r1, #0]
-	mov		r4, r5
-	vst1.32		{q0, q1}, [r0]!
-	bne		neon_copy_32_u_loop
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vldmia		sp!, {q4}
-#else
-	vpop		{q4}
-#endif
-neon_copy_finish_u:
-neon_copy_16_u:
-	movs		r12, r2, lsr #4
-	beq		neon_copy_8_u
-	vdup.u32	q2, r8
-	and		r2, r2, #0xf
-neon_copy_16_u_loop:
-	vld1.32		{q0}, [r1]!
-	lsls		r5, r8, #28
-	bcc		neon_copy_16_u_b8
-	bpl		neon_copy_16_u_b16
-	vshr.u64	q1, q0, #40
-	b		neon_copy_16_unify
-neon_copy_16_u_b8:
-	vshr.u64	q1, q0, #56
-	b		neon_copy_16_unify
-neon_copy_16_u_b16:
-	vshr.u64	q1, q0, #48
-neon_copy_16_unify:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	vshl.u64	q0, q2, q0
-#else
-	vshl.u64	q0, q0, q2
-#endif
-	vmov		r5, s6
-	vorr		d1, d1, d2
-	vmov		s6, r4
-	vorr		d0, d0, d3
-	subs		r12, r12, #1
-	mov		r4, r5
-	vst1.32		{q0}, [r0]!
-	bne		neon_copy_16_u_loop
-neon_copy_8_u:
-	cmp		r2, #8
-	blt		neon_copy_4_u
-	ldm		r1!, {r6-r7}
-	subs		r2, r2, #8
-	orr		r4, r4, r6, lsl r8
-	mov		r5, r6, lsr r9
-	orr		r5, r5, r7, lsl r8
-	stm		r0!, {r4-r5}
-	mov		r4, r7, lsr r9
-neon_copy_4_u:
-	cmp		r2, #4
-	blt		neon_copy_last_bits_u
-	ldr		r5, [r1], #4
-	subs		r2, r2, #4
-	orr		r4, r4, r5, lsl r8
-	str		r4, [r0], #4
-	mov		r4, r5, lsr r9
-neon_copy_last_bits_u:
-	/*
-	 * Remember, r8 contains the size of the data in r4 in bits,
-	 * so to get to bytes we'll need to shift 3 places
-	 */
-	lsr		r8, r8, #0x3
-	/* Write out the bytes stored in r4.*/
-neon_copy_last_bits_u_loop:
-	strb		r4, [r0], #1
-	subs		r8, r8, #1
-	lsrne		r4, r4, #8
-	bne		neon_copy_last_bits_u_loop
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	ldmia		sp!, {r6-r9}
-#else
-	pop		{r6-r9}
-#endif
-neon_copy_finish:
-	cmp		r2, #0
-	beq		neon_end
-	/*
-	 * This just copies the data from source to target one byte
-	 * at a time.  For some small values, this makes more sense.
-	 * Note that since this code copies data a byte at a time,
-	 * both the aligned and unaligned paths can use it.
-	 */
-neon_copy_finish_loop:
-	ldrb		r4, [r1], #1
-	subs		r2, r2, #1
-	strb		r4, [r0], #1
-	bne		neon_copy_finish_loop
-neon_end:
-#if defined __GNUC__ && (4 == __GNUC__ && 1 == __GNUC_MINOR__ && 1 == __GNUC_PATCHLEVEL__)
-	ldmia		sp!, {r4-r5}
-	ldmia		sp!, {r0}
-#else
-	pop		{r4-r5}
-	pop		{r0}
-#endif
-	bx		lr
+        /* make sure we have at least 64 bytes to copy */
+        subs        r2, r2, #64
+        blo         2f
 
-	.endfunc
-	.end
+        /* preload all the cache lines we need.
+         * NOTE: the number of pld below depends on PREFETCH_DISTANCE,
+         * ideally would would increase the distance in the main loop to
+         * avoid the goofy code below. In practice this doesn't seem to make
+         * a big difference.
+         */
+        pld         [r1, #(CACHE_LINE_SIZE*2)]
+        pld         [r1, #(CACHE_LINE_SIZE*3)]
+        pld         [r1, #(PREFETCH_DISTANCE)]
+
+1:      /* The main loop copies 64 bytes at a time */
+        vld1.8      {d0  - d3},   [r1]!
+        vld1.8      {d4  - d7},   [r1]!
+        pld         [r1, #(PREFETCH_DISTANCE)]
+        subs        r2, r2, #64
+        vst1.8      {d0  - d3},   [r0, :128]!
+        vst1.8      {d4  - d7},   [r0, :128]!
+        bhs         1b
+
+2:      /* fix-up the remaining count and make sure we have >= 32 bytes left */
+        add         r2, r2, #64
+        subs        r2, r2, #32
+        blo         4f
+
+3:      /* 32 bytes at a time. These cache lines were already preloaded */
+        vld1.8      {d0 - d3},  [r1]!
+        subs        r2, r2, #32
+        vst1.8      {d0 - d3},  [r0, :128]!
+        bhs         3b
+
+4:      /* less than 32 left */
+        add         r2, r2, #32
+        tst         r2, #0x10
+        beq         5f
+        // copies 16 bytes, 128-bits aligned
+        vld1.8      {d0, d1}, [r1]!
+        vst1.8      {d0, d1}, [r0, :128]!
+
+5:      /* copy up to 15-bytes (count in r2) */
+        movs        ip, r2, lsl #29
+        bcc         1f
+        vld1.8      {d0}, [r1]!
+        vst1.8      {d0}, [r0]!
+1:      bge         2f
+        vld4.8      {d0[0], d1[0], d2[0], d3[0]}, [r1]!
+        vst4.8      {d0[0], d1[0], d2[0], d3[0]}, [r0]!
+2:      movs        ip, r2, lsl #31
+        ldrmib      r3, [r1], #1
+        ldrcsb      ip, [r1], #1
+        ldrcsb      lr, [r1], #1
+        strmib      r3, [r0], #1
+        strcsb      ip, [r0], #1
+        strcsb      lr, [r0], #1
+
+        ldmfd       sp!, {r0, lr}
+        bx          lr
+        .fnend
+
+
+#else   /* __ARM_ARCH__ < 7 */
+
+
+	.text
+
+    .global memcpy
+    .type memcpy, %function
+    .align 4
+
+		/*
+		 * Optimized memcpy() for ARM.
+         *
+		 * note that memcpy() always returns the destination pointer,
+		 * so we have to preserve R0.
+		 */
+
+memcpy:
+		/* The stack must always be 64-bits aligned to be compliant with the
+		 * ARM ABI. Since we have to save R0, we might as well save R4
+		 * which we can use for better pipelining of the reads below
+		 */
+        .fnstart
+        .save       {r0, r4, lr}
+        stmfd       sp!, {r0, r4, lr}
+        /* Making room for r5-r11 which will be spilled later */
+        .pad        #28
+        sub         sp, sp, #28
+
+        // preload the destination because we'll align it to a cache line
+        // with small writes. Also start the source "pump".
+        PLD         (r0, #0)
+        PLD         (r1, #0)
+        PLD         (r1, #32)
+
+		/* it simplifies things to take care of len<4 early */
+		cmp			r2, #4
+		blo			copy_last_3_and_return
+
+		/* compute the offset to align the source
+		 * offset = (4-(src&3))&3 = -src & 3
+		 */
+		rsb			r3, r1, #0
+		ands		r3, r3, #3
+		beq			src_aligned
+
+		/* align source to 32 bits. We need to insert 2 instructions between
+		 * a ldr[b|h] and str[b|h] because byte and half-word instructions
+		 * stall 2 cycles.
+		 */
+		movs		r12, r3, lsl #31
+		sub			r2, r2, r3		/* we know that r3 <= r2 because r2 >= 4 */
+		ldrmib		r3, [r1], #1
+		ldrcsb		r4, [r1], #1
+		ldrcsb		r12,[r1], #1
+        strmib		r3, [r0], #1
+		strcsb		r4, [r0], #1
+		strcsb		r12,[r0], #1
+
+src_aligned:
+
+		/* see if src and dst are aligned together (congruent) */
+		eor			r12, r0, r1
+		tst			r12, #3
+		bne			non_congruent
+
+        /* Use post-incriment mode for stm to spill r5-r11 to reserved stack
+         * frame. Don't update sp.
+         */
+        stmea		sp, {r5-r11}
+
+		/* align the destination to a cache-line */
+		rsb         r3, r0, #0
+		ands		r3, r3, #0x1C
+		beq         congruent_aligned32
+		cmp         r3, r2
+		andhi		r3, r2, #0x1C
+
+		/* conditionnaly copies 0 to 7 words (length in r3) */
+		movs		r12, r3, lsl #28
+		ldmcsia		r1!, {r4, r5, r6, r7}	/* 16 bytes */
+		ldmmiia		r1!, {r8, r9}			/*  8 bytes */
+		stmcsia		r0!, {r4, r5, r6, r7}
+		stmmiia		r0!, {r8, r9}
+		tst         r3, #0x4
+		ldrne		r10,[r1], #4			/*  4 bytes */
+		strne		r10,[r0], #4
+		sub         r2, r2, r3
+
+congruent_aligned32:
+		/*
+		 * here source is aligned to 32 bytes.
+		 */
+
+cached_aligned32:
+        subs        r2, r2, #32
+        blo         less_than_32_left
+
+        /*
+         * We preload a cache-line up to 32 bytes ahead. On the 926, this will
+         * stall only until the requested world is fetched, but the linefill 
+         * continues in the the background.
+         * While the linefill is going, we write our previous cache-line
+         * into the write-buffer (which should have some free space).
+         * When the linefill is done, the writebuffer will
+         * start dumping its content into memory
+         *
+         * While all this is going, we then load a full cache line into
+         * 8 registers, this cache line should be in the cache by now
+         * (or partly in the cache).
+         *
+         * This code should work well regardless of the source/dest alignment.
+         *
+         */
+
+1:      ldmia       r1!, { r4-r11 }
+        PLD         [r1, #32]
+        subs        r2, r2, #32
+
+        stmia       r0!, { r4-r11 }
+        blo         2f
+        b           1b
+		
+2:      add         r2, r2, #32
+
+
+
+
+less_than_32_left:
+		/*
+		 * less than 32 bytes left at this point (length in r2)
+		 */
+
+		/* skip all this if there is nothing to do, which should
+		 * be a common case (if not executed the code below takes
+		 * about 16 cycles)
+		 */
+		tst			r2, #0x1F
+		beq			1f
+
+		/* conditionnaly copies 0 to 31 bytes */
+		movs		r12, r2, lsl #28
+		ldmcsia		r1!, {r4, r5, r6, r7}	/* 16 bytes */
+		ldmmiia		r1!, {r8, r9}			/*  8 bytes */
+		stmcsia		r0!, {r4, r5, r6, r7}
+		stmmiia		r0!, {r8, r9}
+		movs		r12, r2, lsl #30
+		ldrcs		r3, [r1], #4			/*  4 bytes */
+		ldrmih		r4, [r1], #2			/*  2 bytes */
+		strcs		r3, [r0], #4
+		strmih		r4, [r0], #2
+		tst         r2, #0x1
+		ldrneb		r3, [r1]				/*  last byte  */
+		strneb		r3, [r0]
+
+		/* we're done! restore everything and return */
+1:		ldmfd		sp!, {r5-r11}
+		ldmfd		sp!, {r0, r4, lr}
+		bx			lr
+
+		/********************************************************************/
+
+non_congruent:
+		/*
+		 * here source is aligned to 4 bytes
+		 * but destination is not.
+		 *
+		 * in the code below r2 is the number of bytes read
+		 * (the number of bytes written is always smaller, because we have
+		 * partial words in the shift queue)
+		 */
+		cmp			r2, #4
+		blo			copy_last_3_and_return
+
+        /* Use post-incriment mode for stm to spill r5-r11 to reserved stack
+         * frame. Don't update sp.
+         */
+        stmea		sp, {r5-r11}
+
+		/* compute shifts needed to align src to dest */
+		rsb			r5, r0, #0
+		and			r5, r5, #3			/* r5 = # bytes in partial words */
+		mov			r12, r5, lsl #3		/* r12 = right */
+		rsb			lr, r12, #32		/* lr = left  */
+
+		/* read the first word */
+		ldr			r3, [r1], #4
+		sub			r2, r2, #4
+
+		/* write a partial word (0 to 3 bytes), such that destination
+		 * becomes aligned to 32 bits (r5 = nb of words to copy for alignment)
+		 */
+		movs		r5, r5, lsl #31
+		strmib		r3, [r0], #1
+		movmi		r3, r3, lsr #8
+		strcsb		r3, [r0], #1
+		movcs		r3, r3, lsr #8
+		strcsb		r3, [r0], #1
+		movcs		r3, r3, lsr #8
+
+		cmp			r2, #4
+		blo			partial_word_tail
+
+		/* Align destination to 32 bytes (cache line boundary) */
+1:		tst			r0, #0x1c
+		beq			2f
+		ldr			r5, [r1], #4
+		sub         r2, r2, #4
+		orr			r4, r3, r5,		lsl lr
+		mov			r3, r5,			lsr r12
+		str			r4, [r0], #4
+        cmp         r2, #4
+		bhs			1b
+		blo			partial_word_tail
+
+		/* copy 32 bytes at a time */
+2:		subs		r2, r2, #32
+		blo			less_than_thirtytwo
+
+		/* Use immediate mode for the shifts, because there is an extra cycle
+		 * for register shifts, which could account for up to 50% of
+		 * performance hit.
+		 */
+
+        cmp			r12, #24
+		beq			loop24
+		cmp			r12, #8
+		beq			loop8
+
+loop16:
+        ldr         r12, [r1], #4
+1:      mov         r4, r12
+		ldmia		r1!, {   r5,r6,r7,  r8,r9,r10,r11}
+        PLD         (r1, #64)
+        subs        r2, r2, #32
+        ldrhs       r12, [r1], #4
+		orr			r3, r3, r4,		lsl #16
+		mov			r4, r4,			lsr #16
+		orr			r4, r4, r5,		lsl #16
+		mov			r5, r5,			lsr #16
+		orr			r5, r5, r6,		lsl #16
+		mov			r6, r6,			lsr #16
+		orr			r6, r6, r7,		lsl #16
+		mov			r7, r7,			lsr #16
+		orr			r7, r7, r8,		lsl #16
+		mov			r8, r8,			lsr #16
+		orr			r8, r8, r9,		lsl #16
+		mov			r9, r9,			lsr #16
+		orr			r9, r9, r10,	lsl #16
+		mov			r10, r10,		lsr #16
+		orr			r10, r10, r11,	lsl #16
+		stmia		r0!, {r3,r4,r5,r6, r7,r8,r9,r10}
+		mov			r3, r11,		lsr #16
+		bhs			1b
+		b			less_than_thirtytwo
+
+loop8:
+        ldr         r12, [r1], #4
+1:      mov         r4, r12
+		ldmia		r1!, {   r5,r6,r7,  r8,r9,r10,r11}
+        PLD         (r1, #64)
+		subs		r2, r2, #32
+        ldrhs       r12, [r1], #4
+		orr			r3, r3, r4,		lsl #24
+		mov			r4, r4,			lsr #8
+		orr			r4, r4, r5,		lsl #24
+		mov			r5, r5,			lsr #8
+		orr			r5, r5, r6,		lsl #24
+		mov			r6, r6,			lsr #8
+		orr			r6, r6, r7,		lsl #24
+		mov			r7, r7,			lsr #8
+		orr			r7, r7, r8,		lsl #24
+		mov			r8, r8,			lsr #8
+		orr			r8, r8, r9,		lsl #24
+		mov			r9, r9,			lsr #8
+		orr			r9, r9, r10,	lsl #24
+		mov			r10, r10,		lsr #8
+		orr			r10, r10, r11,	lsl #24
+		stmia		r0!, {r3,r4,r5,r6, r7,r8,r9,r10}
+		mov			r3, r11,		lsr #8
+		bhs			1b
+		b			less_than_thirtytwo
+
+loop24:
+        ldr         r12, [r1], #4
+1:      mov         r4, r12
+		ldmia		r1!, {   r5,r6,r7,  r8,r9,r10,r11}
+        PLD         (r1, #64)
+		subs		r2, r2, #32
+        ldrhs       r12, [r1], #4
+		orr			r3, r3, r4,		lsl #8
+		mov			r4, r4,			lsr #24
+		orr			r4, r4, r5,		lsl #8
+		mov			r5, r5,			lsr #24
+		orr			r5, r5, r6,		lsl #8
+		mov			r6, r6,			lsr #24
+		orr			r6, r6, r7,		lsl #8
+		mov			r7, r7,			lsr #24
+		orr			r7, r7, r8,		lsl #8
+		mov			r8, r8,			lsr #24
+		orr			r8, r8, r9,		lsl #8
+		mov			r9, r9,			lsr #24
+		orr			r9, r9, r10,	lsl #8
+		mov			r10, r10,		lsr #24
+		orr			r10, r10, r11,	lsl #8
+		stmia		r0!, {r3,r4,r5,r6, r7,r8,r9,r10}
+		mov			r3, r11,		lsr #24
+		bhs			1b
+
+
+less_than_thirtytwo:
+		/* copy the last 0 to 31 bytes of the source */
+		rsb			r12, lr, #32		/* we corrupted r12, recompute it  */
+		add			r2, r2, #32
+		cmp			r2, #4
+		blo			partial_word_tail
+
+1:		ldr			r5, [r1], #4
+		sub         r2, r2, #4
+		orr			r4, r3, r5,		lsl lr
+		mov			r3,	r5,			lsr r12
+		str			r4, [r0], #4
+        cmp         r2, #4
+		bhs			1b
+
+partial_word_tail:
+		/* we have a partial word in the input buffer */
+		movs		r5, lr, lsl #(31-3)
+		strmib		r3, [r0], #1
+		movmi		r3, r3, lsr #8
+		strcsb		r3, [r0], #1
+		movcs		r3, r3, lsr #8
+		strcsb		r3, [r0], #1
+
+		/* Refill spilled registers from the stack. Don't update sp. */
+		ldmfd		sp, {r5-r11}
+
+copy_last_3_and_return:
+		movs		r2, r2, lsl #31	/* copy remaining 0, 1, 2 or 3 bytes */
+		ldrmib		r2, [r1], #1
+		ldrcsb		r3, [r1], #1
+		ldrcsb		r12,[r1]
+		strmib		r2, [r0], #1
+		strcsb		r3, [r0], #1
+		strcsb		r12,[r0]
+
+        /* we're done! restore sp and spilled registers and return */
+        add         sp,  sp, #28
+		ldmfd		sp!, {r0, r4, lr}
+		bx			lr
+        .fnend
+
+
+#endif    /* __ARM_ARCH__ < 7 */

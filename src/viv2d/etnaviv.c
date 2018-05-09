@@ -526,7 +526,6 @@ struct etna_bo *etna_bo_new(struct etna_device *dev, uint32_t size,
 		return NULL;
 
 	bo = bo_from_handle(dev, size, req.handle, flags);
-
 	return bo;
 }
 
@@ -623,6 +622,7 @@ void etna_bo_cpu_fini(struct etna_bo *bo)
 	                &req, sizeof(req));
 }
 
+
 /* destroy a buffer object */
 void etna_bo_del(struct etna_bo *bo)
 {
@@ -639,6 +639,8 @@ void etna_bo_del(struct etna_bo *bo)
 
 	free(bo);
 }
+
+/* extra */
 
 void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo) {
 	int err;

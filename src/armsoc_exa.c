@@ -34,8 +34,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-//#define ARMSOC_BO_MIN_SIZE (2048 * 2048)
-#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
+#define ARMSOC_BO_MIN_SIZE (2048 * 2048)
+//#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
 //#define ARMSOC_BO_MIN_SIZE 0
 
 Bool
@@ -101,7 +101,7 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
 //		INFO_MSG("AllocBuf create %p", &priv->buf);
-		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, bitsPerPixel, &priv->buf);
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, depth, bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
 			ERROR_MSG("failed to allocate %dx%d mem", width, height);
@@ -275,7 +275,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		}
 
 //		INFO_MSG("AllocBuf modify %p",&priv->buf);
-		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.bitsPerPixel, &priv->buf);
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.depth, pPixmap->drawable.bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
 			ERROR_MSG("failed to allocate %d bytes mem",

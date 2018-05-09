@@ -135,6 +135,39 @@ static int VIV2DDetectDevice(const char *name)
 	return -1;
 }
 
+static inline Bool Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFormat *fmt)
+{
+	fmt->bpp = bpp;
+	fmt->depth = depth;
+	fmt->swizzle = DE_SWIZZLE_ARGB;
+	switch (bpp) {
+#ifdef VIV2D_SUPPORT_MONO
+	case 1:
+		fmt->fmt = DE_FORMAT_MONOCHROME;
+		break;
+#endif
+	case 8:
+		fmt->fmt = DE_FORMAT_A8;
+		break;
+	case 16:
+		if (depth == 15)
+			fmt->fmt = DE_FORMAT_X1R5G5B5;
+		else
+			fmt->fmt = DE_FORMAT_R5G6B5;
+		break;
+	case 32:
+		if (depth == 24)
+			fmt->fmt = DE_FORMAT_X8R8G8B8;
+		else
+			fmt->fmt = DE_FORMAT_A8R8G8B8;
+		break;
+	default:
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
 static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
 	if (armsocPix) {
 		Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
@@ -144,6 +177,7 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		} else {
 			if (armsocPix->bo && pix->bo) {
 				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
+				Viv2DSetFormat(32, 32, &pix->format);
 #ifdef VIV2D_CACHE_BO
 				Viv2DCacheDelBo(v2d, pix->bo);
 #else
@@ -165,7 +199,7 @@ static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 				pix->bo = v2d->bo;
 			} else {
 				int fd = armsoc_bo_get_dmabuf(armsocPix->bo);
-				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap %d",fd);
+				VIV2D_DBG_MSG("Viv2DAttachBo: etna bo from omap %d", fd);
 				if (fd) {
 					pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 					close(fd);
@@ -221,39 +255,6 @@ static inline uint32_t Viv2DColour(Pixel pixel, int depth) {
 		break;
 	}
 	return colour;
-}
-
-static inline Bool Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFormat *fmt)
-{
-	fmt->bpp = bpp;
-	fmt->depth = depth;
-	fmt->swizzle = DE_SWIZZLE_ARGB;
-	switch (bpp) {
-#ifdef VIV2D_SUPPORT_MONO
-	case 1:
-		fmt->fmt = DE_FORMAT_MONOCHROME;
-		break;
-#endif
-	case 8:
-		fmt->fmt = DE_FORMAT_A8;
-		break;
-	case 16:
-		if (depth == 15)
-			fmt->fmt = DE_FORMAT_X1R5G5B5;
-		else
-			fmt->fmt = DE_FORMAT_R5G6B5;
-		break;
-	case 32:
-		if (depth == 24)
-			fmt->fmt = DE_FORMAT_X8R8G8B8;
-		else
-			fmt->fmt = DE_FORMAT_A8R8G8B8;
-		break;
-	default:
-		return FALSE;
-	}
-
-	return TRUE;
 }
 
 #ifdef VIV2D_1X1_REPEAT_AS_SOLID
@@ -460,16 +461,19 @@ Viv2DPixmapIsOffscreen(PixmapPtr pPixmap)
 
 static void *
 Viv2DCreatePixmap2 (ScreenPtr pScreen, int width, int height,
-                   int depth, int usage_hint, int bitsPerPixel,
-                   int *new_fb_pitch)
+                    int depth, int usage_hint, int bitsPerPixel,
+                    int *new_fb_pitch)
 {
 	struct ARMSOCPixmapPrivRec *armsocPix = ARMSOCCreatePixmap2(pScreen, width, height, depth,
 	                                        usage_hint, bitsPerPixel, new_fb_pitch);
 	Viv2DPixmapPrivPtr pix = calloc(sizeof(Viv2DPixmapPrivRec), 1);
 	VIV2D_DBG_MSG("Viv2DCreatePixmap pix %p", pix);
 
+	Viv2DSetFormat(32, 32, &pix->format);
+
 	armsocPix->priv = pix;
 	pix->armsocPix = armsocPix;
+
 	return armsocPix;
 }
 
@@ -520,7 +524,7 @@ static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 	buf->size = 0;
 }
 
-static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int bpp, struct ARMSOCEXABuf *buf) {
+static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
 	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 	Viv2DRec *v2d = v2d_exa->v2d;
 
@@ -528,8 +532,10 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int b
 	int size = pitch * height;
 
 	VIV2D_DBG_MSG("Viv2DAllocBuf: %p %d", buf, size);
+	Viv2DFormat fmt;
 
-	if (size > VIV2D_MIN_SIZE) {
+	// do not create etna bo if too small or unsupported format
+	if (size > VIV2D_MIN_SIZE && Viv2DSetFormat(depth, bpp, &fmt)) {
 		struct etna_bo *bo;
 #ifdef VIV2D_USERPTR
 //		buf->buf = malloc_aligned(PAGE_SIZE, PAGE_ALIGN(size));
@@ -628,7 +634,8 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 					pix->height = armsoc_bo_height(armsocPix->bo);
 					pix->pitch = armsoc_bo_pitch(armsocPix->bo);
 					Viv2DDetachBo(pARMSOC, armsocPix);
-					return Viv2DAttachBo(pARMSOC, armsocPix);
+					Bool ret = Viv2DAttachBo(pARMSOC, armsocPix);
+					return ret;
 				}
 			} else {
 				if (pix->width != width ||
@@ -640,7 +647,8 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 					pix->height = height;
 					pix->pitch = armsocPix->buf.pitch;
 					Viv2DDetachBo(pARMSOC, armsocPix);
-					return Viv2DAttachBo(pARMSOC, armsocPix);
+					Bool ret = Viv2DAttachBo(pARMSOC, armsocPix);
+					return ret;
 				}
 			}
 		}
@@ -684,8 +692,6 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
  * UploadToScreen() is not required, but is recommended if Composite
  * acceleration is supported.
  */
-
-extern void* neon_memcpy(void* dest, const void* source, unsigned int numBytes);
 
 #ifdef VIV2D_UPLOAD_TO_SCREEN
 static Bool Viv2DUploadToScreen(PixmapPtr pDst,
@@ -765,10 +771,10 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	exaMarkSync(pDst->drawable.pScreen);
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
-	               pDst, etna_bo_map(dst->bo),
-	               src, src_pitch, tmp->pitch, x, y, w, h,
-	               pDst->drawable.width, pDst->drawable.height,
-	               pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+	              pDst, etna_bo_map(dst->bo),
+	              src, src_pitch, tmp->pitch, x, y, w, h,
+	              pDst->drawable.width, pDst->drawable.height,
+	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
 
 	return TRUE;
 }
@@ -1326,6 +1332,12 @@ Viv2DCheckComposite (int op,
 		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite dst:%p unsupported dst format %s", pDst, pix_format_name(pDstPicture->format));
 		return FALSE;
 	}
+/*
+	if (src_fmt.fmt != DE_FORMAT_A8R8G8B8 || dst_fmt.fmt != DE_FORMAT_A8R8G8B8)
+	{
+		return FALSE; 
+	}
+*/
 
 #ifndef VIV2D_SUPPORT_A8_DST
 	if (dst_fmt.fmt == DE_FORMAT_A8) {
@@ -1810,13 +1822,13 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		{
 		} else {
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
-			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
+			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, 
+			                 v2d->op.rects, v2d->op.cur_rect);
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
 		}
 	}
 	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
 	exaMarkSync(pDst->drawable.pScreen);
-//	_Viv2DStreamCommit(v2d, FALSE); // why this is needed ?
 }
 
 #else

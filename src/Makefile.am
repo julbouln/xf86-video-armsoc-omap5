@@ -67,6 +67,7 @@ omap5_drv_la_SOURCES = \
          armsoc_present.c \
          armsoc_xv.c \
          neon_memcpy.S \
+         neon_memset.S \
          viv2d/etnaviv.c \
          viv2d/viv2d_exa.c \
          $(DRMMODE_SRCS)
