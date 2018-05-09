@@ -14,11 +14,11 @@
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
-//#define VIV2D_DBG_MSG(fmt, ...)
-#define VIV2D_DBG_MSG(fmt, ...)		\
+#define VIV2D_DBG_MSG(fmt, ...)
+/*#define VIV2D_DBG_MSG(fmt, ...)		\
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-
+*/
 #define VIV2D_UNSUPPORTED_MSG(fmt, ...)
 /*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
 		do { xf86Msg(X_WARNING, fmt "\n",\
