@@ -135,6 +135,7 @@ static inline uint32_t Viv2DSrcConfig(Viv2DFormat *format) {
 
 	return src_cfg;
 }
+
 static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height, Viv2DFormat *format) {
 //	_Viv2DStreamReserve(v2d->stream, 12);
 	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo);
@@ -151,6 +152,7 @@ static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr sr
 	VIV2D_DBG_MSG("_Viv2DStreamSrcWithFormat src:%p x:%d y:%d width:%d height:%d fmt:%s/%s",
 	              src, srcX, srcY, width, height, Viv2DFormatColorStr(format), Viv2DFormatSwizzleStr(format));
 }
+
 static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height) {
 	_Viv2DStreamSrcWithFormat( v2d,  src,  srcX,  srcY,  width,  height, &src->format);
 }
@@ -270,10 +272,11 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 //		_Viv2DStreamReserve(v2d->stream, 10);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
 		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
-		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES, 0);
+/*		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES, 0);
 		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, 0);
 		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, 0);
 		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, 0);
+		*/
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp disabled");
 	}
 }
@@ -291,12 +294,17 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, unsigned int color) {
 
 // higher level helpers
 
+static inline void _Viv2DStreamFlush(Viv2DPtr v2d) {
+	etna_set_state(v2d->stream, VIVS_GL_FLUSH_CACHE, VIVS_GL_FLUSH_CACHE_PE2D);
+}
+
 #define VIV2D_SRC_PIX_RES 12
 #define VIV2D_SRC_SOLID_RES 8
 #define VIV2D_SRC_1X1_RES 16
 #define VIV2D_DEST_RES 14
 #define VIV2D_BLEND_ON_RES 10
-#define VIV2D_BLEND_OFF_RES 10
+#define VIV2D_BLEND_OFF_RES 2
+#define VIV2D_FLUSH_RES 2
 #define VIV2D_RECTS_RES(cnt) cnt*2+2
 
 static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_rect, Bool blend) {
@@ -320,24 +328,29 @@ static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_r
 
 	reserve += VIV2D_RECTS_RES(cur_rect);
 
+	reserve += VIV2D_FLUSH_RES;
+
 	_Viv2DStreamReserve(v2d, reserve);
 }
 
 static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint32_t color, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_RECTS_RES(cur_rect));
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
+	// FIXME cause a bug
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE); // reset blend
 	_Viv2DStreamColor(v2d, color);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+	_Viv2DStreamFlush(v2d);
 }
 
 static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
                                     int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect));
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
 	_Viv2DStreamSrc(v2d, src, x, y, w, h);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 	_Viv2DStreamBlendOp(v2d, blend_op, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+	_Viv2DStreamFlush(v2d);
 }
 
 static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
@@ -381,6 +394,8 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 
 	_Viv2DStreamBlendOp(v2d, blend_op, src_alpha, dst_alpha, src_global, dst_global);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+	_Viv2DStreamFlush(v2d);
+
 }
 
 static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {

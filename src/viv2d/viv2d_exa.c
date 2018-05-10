@@ -630,7 +630,6 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 	return TRUE;
 }
 
-
 /**
  * UploadToScreen() loads a rectangle of data from src into pDst.
  *

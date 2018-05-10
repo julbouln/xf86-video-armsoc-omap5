@@ -38,9 +38,10 @@
 // WIP
 //#define VIV2D_USERPTR 1
 
+// CPU only for surface < VIV2D_MIN_SIZE
 //#define VIV2D_MIN_SIZE 0
-//#define VIV2D_MIN_SIZE 1024 // > 16x16 32bpp
-#define VIV2D_MIN_SIZE 1024*4 // > 32x32 32bpp
+#define VIV2D_MIN_SIZE 1024 // > 16x16 32bpp
+//#define VIV2D_MIN_SIZE 1024*4 // > 32x32 32bpp
 //#define VIV2D_MIN_SIZE 1024*16 // > 64x64 32bpp
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
