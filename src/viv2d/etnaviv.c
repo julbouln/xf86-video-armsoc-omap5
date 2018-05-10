@@ -658,11 +658,11 @@ void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_b
 	                      &req, sizeof(req));
 }
 
-struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size) {
+struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size, int flags) {
 	struct drm_etnaviv_gem_userptr req = {
 		.user_ptr = (uintptr_t)memory,
 		.user_size = size,
-		.flags = (ETNA_USERPTR_READ | ETNA_USERPTR_WRITE),
+		.flags = flags,
 		.handle = 0
 	};
 	int err;

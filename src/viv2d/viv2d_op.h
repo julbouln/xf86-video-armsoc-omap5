@@ -384,7 +384,6 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 }
 
 static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
-#if 1
 	if (pix && pix->bo) {
 		Viv2DRect rect[1];
 		rect[0].x1 = 0;
@@ -393,9 +392,7 @@ static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 		rect[0].y2 = pix->height;
 
 		_Viv2DStreamSolid(v2d, pix, 0xff000000, rect, 1);
-//	_Viv2DStreamCommit(v2d, FALSE);
 	}
-#endif
 }
 
 
@@ -421,23 +418,6 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 //			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
 			v2d->cache[i].used = 1;
 			bo = v2d->cache[i].bo;
-#if 1
-//			_Viv2DStreamCommit(v2d, TRUE);
-
-			int asize = ALIGN(size, 4096)/4;
-			Viv2DPixmapPrivRec pix;
-			pix.bo = bo;
-			pix.width = 32;
-			pix.height = asize/32;
-			pix.pitch = 32*4;
-			pix.format.bpp = 32;
-			pix.format.depth = 32;
-			pix.format.swizzle = DE_SWIZZLE_ARGB;
-			pix.format.fmt = DE_FORMAT_A8R8G8B8;
-
-			_Viv2DStreamClear(v2d, &pix);
-//			_Viv2DStreamCommit(v2d, TRUE);
-#endif
 #if 0
 			// FIXME: the GPU should do that
 			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE);

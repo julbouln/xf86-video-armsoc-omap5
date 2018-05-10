@@ -32,6 +32,7 @@
 //#define VIV2D_SUPPORT_A8_DST 1
 //#define VIV2D_SUPPORT_MONO 1
 
+// WIP
 //#define VIV2D_USERPTR 1
 
 //#define VIV2D_MIN_SIZE 0
