@@ -779,10 +779,8 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-	if (dst->bo == v2d->bo || use_usermem) {
-		_Viv2DStreamCommit(v2d, TRUE);
-		exaMarkSync(pDst->drawable.pScreen);
-	}
+	_Viv2DStreamCommit(v2d, TRUE);
+	exaMarkSync(pDst->drawable.pScreen);
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
 	              pDst, etna_bo_map(dst->bo),
@@ -863,7 +861,7 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported format %d/%d %p", pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, src);
 		return FALSE;
 	}
-	
+
 	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pSrc->drawable.bitsPerPixel);
 	tmp->format = tmp_fmt;
 
@@ -1039,12 +1037,10 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 
 	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
 
-/*
-	if (v2d->op.dst->bo == v2d->bo) {
-		_Viv2DStreamCommit(v2d, TRUE);
-		exaMarkSync(pPixmap->drawable.pScreen);
-	}
-*/
+	/*
+			_Viv2DStreamCommit(v2d, TRUE);
+			exaMarkSync(pPixmap->drawable.pScreen);
+	*/
 }
 /** @} */
 #else
@@ -1224,10 +1220,8 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 
 	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
 
-	if (v2d->op.dst->bo == v2d->bo) {
-		_Viv2DStreamCommit(v2d, TRUE);
-		exaMarkSync(pDstPixmap->drawable.pScreen);
-	}
+	_Viv2DStreamCommit(v2d, TRUE);
+	exaMarkSync(pDstPixmap->drawable.pScreen);
 }
 /** @} */
 #else
@@ -1870,11 +1864,9 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
 		}
 	}
-	
-	if (v2d->op.dst->bo == v2d->bo) {
-		_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
-		exaMarkSync(pDst->drawable.pScreen);
-	}
+
+	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
+	exaMarkSync(pDst->drawable.pScreen);
 }
 
 #else

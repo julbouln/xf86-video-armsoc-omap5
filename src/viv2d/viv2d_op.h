@@ -418,7 +418,7 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 //			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
 			v2d->cache[i].used = 1;
 			bo = v2d->cache[i].bo;
-#if 0
+#ifdef VIV2D_CPU_BO_CLEAR
 			// FIXME: the GPU should do that
 			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE);
 			char *buf = etna_bo_map(bo);

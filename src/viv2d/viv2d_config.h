@@ -30,6 +30,7 @@
 #define VIV2D_SUPPORT_A8_MASK 1
 
 #define VIV2D_NON_RGBA_FIX 1
+//#define VIV2D_CPU_BO_CLEAR 1
 
 //#define VIV2D_SUPPORT_A8_DST 1
 //#define VIV2D_SUPPORT_MONO 1
@@ -39,7 +40,8 @@
 
 //#define VIV2D_MIN_SIZE 0
 //#define VIV2D_MIN_SIZE 1024 // > 16x16 32bpp
-#define VIV2D_MIN_SIZE 4096 // > 32x32 32bpp
+#define VIV2D_MIN_SIZE 1024*4 // > 32x32 32bpp
+//#define VIV2D_MIN_SIZE 1024*16 // > 64x64 32bpp
 
 //#define VIV2D_SIZE_CONSTRAINTS 1
 //#define VIV2D_MIN_HW_HEIGHT 64
