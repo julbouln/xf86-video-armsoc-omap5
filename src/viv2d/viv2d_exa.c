@@ -719,7 +719,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	src_x = (((uintptr_t)src - page_start) % src_pitch) / 4;
 	src_y = (((uintptr_t)src - page_start) / src_pitch);
 	size_t aligned_size = PAGE_ALIGN(src_pitch * (h + src_y + 1));
-	if (aligned_size < 1024 * 1024 * 32) {
+	if (aligned_size < 1024 * 1024 * 16) {
 
 		VIV2D_INFO_MSG("Viv2DUploadToScreen page aligned %p %dx%d", src, src_x, src_y);
 		struct etna_bo *aligned_bo = etna_bo_from_usermem_prot(v2d->dev, start_buf, aligned_size, ETNA_USERPTR_READ);
@@ -779,14 +779,16 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-	_Viv2DStreamCommit(v2d, TRUE);
-	exaMarkSync(pDst->drawable.pScreen);
+	if (dst->bo == v2d->bo || use_usermem) {
+		_Viv2DStreamCommit(v2d, TRUE);
+		exaMarkSync(pDst->drawable.pScreen);
+	}
 
-	VIV2D_INFO_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
-	               pDst, etna_bo_map(dst->bo),
-	               src, src_pitch, tmp->pitch, x, y, w, h,
-	               pDst->drawable.width, pDst->drawable.height,
-	               pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
+	              pDst, etna_bo_map(dst->bo),
+	              src, src_pitch, tmp->pitch, x, y, w, h,
+	              pDst->drawable.width, pDst->drawable.height,
+	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
 
 #ifdef VIV2D_USERPTR
 	if (use_usermem) {
@@ -844,6 +846,7 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	Viv2DRect rects[1];
 	Viv2DPixmapPrivPtr tmp;
 	char *dst_buf, *buf;
+	Viv2DFormat tmp_fmt;
 
 	if (w * h < 4)
 		return FALSE;
@@ -856,12 +859,13 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 		return FALSE;
 	}
 
-	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pSrc->drawable.bitsPerPixel);
-
-	if (!Viv2DSetFormat(pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, &tmp->format)) {
+	if (!Viv2DSetFormat(pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, &tmp_fmt)) {
 		VIV2D_UNSUPPORTED_MSG("Viv2DUploadToScreen unsupported format %d/%d %p", pSrc->drawable.depth, pSrc->drawable.bitsPerPixel, src);
 		return FALSE;
 	}
+	
+	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pSrc->drawable.bitsPerPixel);
+	tmp->format = tmp_fmt;
 
 	pitch = tmp->pitch;
 
@@ -1035,8 +1039,12 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 
 	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
 
-//	_Viv2DStreamCommit(v2d,TRUE);
-//	exaMarkSync(pPixmap->drawable.pScreen);
+/*
+	if (v2d->op.dst->bo == v2d->bo) {
+		_Viv2DStreamCommit(v2d, TRUE);
+		exaMarkSync(pPixmap->drawable.pScreen);
+	}
+*/
 }
 /** @} */
 #else
@@ -1216,8 +1224,10 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 
 	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
 
-	_Viv2DStreamCommit(v2d, TRUE);
-	exaMarkSync(pDstPixmap->drawable.pScreen);
+	if (v2d->op.dst->bo == v2d->bo) {
+		_Viv2DStreamCommit(v2d, TRUE);
+		exaMarkSync(pDstPixmap->drawable.pScreen);
+	}
 }
 /** @} */
 #else
@@ -1714,6 +1724,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
 		_Viv2DStreamClear(v2d, tmp);
 
+#ifdef VIV2D_NON_RGBA_FIX
 		// for some reasons, there is problem with non A8R8G8B8 surfaces
 		if ((v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
 		        (v2d->op.msk && v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
@@ -1738,7 +1749,9 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 mask composite");
 
-		} else {
+		} else
+#endif
+		{
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp,
 			                 NULL, srcX, srcY, width, height, mrect, 1);
 			_Viv2DStreamComp(v2d, v2d->op.msk_type, v2d->op.msk, &v2d->op.msk_fmt, v2d->op.mask, tmp,
@@ -1748,6 +1761,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		}
 
 	} else {
+#ifdef VIV2D_NON_RGBA_FIX
 		// we need to use intermediary surfaces if dst or src is not A8R8G8B8
 		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 ||
 		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
@@ -1792,7 +1806,9 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 src composite");
 
-		} else {
+		} else
+#endif
+		{
 			// new srcX,srcY group
 			if (v2d->op.prev_src_x != srcX || v2d->op.prev_src_y != srcY || v2d->op.cur_rect >= VIV2D_MAX_RECTS)
 			{
@@ -1842,17 +1858,23 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		VIV2D_DBG_MSG("Viv2DDoneComposite with msk dst:%p %d", pDst, v2d->stream->offset);
 		// already done masked operations
 	} else {
+#ifdef VIV2D_NON_RGBA_FIX
 		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
-		} else {
+		} else
+#endif
+		{
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
 			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height,
 			                 v2d->op.rects, v2d->op.cur_rect);
 			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
 		}
 	}
-	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
-	exaMarkSync(pDst->drawable.pScreen);
+	
+	if (v2d->op.dst->bo == v2d->bo) {
+		_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
+		exaMarkSync(pDst->drawable.pScreen);
+	}
 }
 
 #else
