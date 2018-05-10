@@ -267,9 +267,13 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
 
 	} else {
-//		_Viv2DStreamReserve(v2d->stream, 2);
+//		_Viv2DStreamReserve(v2d->stream, 10);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
 		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
+		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES, 0);
+		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, 0);
+		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, 0);
+		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, 0);
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp disabled");
 	}
 }
@@ -292,7 +296,7 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, unsigned int color) {
 #define VIV2D_SRC_1X1_RES 16
 #define VIV2D_DEST_RES 14
 #define VIV2D_BLEND_ON_RES 10
-#define VIV2D_BLEND_OFF_RES 2
+#define VIV2D_BLEND_OFF_RES 10
 #define VIV2D_RECTS_RES(cnt) cnt*2+2
 
 static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_rect, Bool blend) {
@@ -320,8 +324,9 @@ static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_r
 }
 
 static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint32_t color, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_SOLID_RES + VIV2D_RECTS_RES(cur_rect));
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_RECTS_RES(cur_rect));
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, NULL);
+	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE); // reset blend
 	_Viv2DStreamColor(v2d, color);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
 }
@@ -416,7 +421,9 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 //			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
 			v2d->cache[i].used = 1;
 			bo = v2d->cache[i].bo;
-#if 0
+#if 1
+//			_Viv2DStreamCommit(v2d, TRUE);
+
 			int asize = ALIGN(size, 4096)/4;
 			Viv2DPixmapPrivRec pix;
 			pix.bo = bo;
@@ -429,9 +436,9 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 			pix.format.fmt = DE_FORMAT_A8R8G8B8;
 
 			_Viv2DStreamClear(v2d, &pix);
-			_Viv2DStreamCommit(v2d, TRUE);
+//			_Viv2DStreamCommit(v2d, TRUE);
 #endif
-#if 1
+#if 0
 			// FIXME: the GPU should do that
 			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE);
 			char *buf = etna_bo_map(bo);
