@@ -675,10 +675,10 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	Viv2DPixmapPrivPtr tmp;
 	int pitch;
 	char *src_buf, *buf;
-
-	Viv2DPixmapPrivRec aligned_tmp;
 	Viv2DFormat tmp_fmt;
 	int use_usermem = 0;
+	int src_x = 0;
+	int src_y = 0;
 
 	if (w * h < 4)
 		return FALSE;
@@ -710,26 +710,42 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 #endif
 
 #ifdef VIV2D_USERPTR
-	if ((uintptr_t)src == ALIGN((uintptr_t)src, PAGE_SIZE)) {
-		VIV2D_INFO_MSG("Viv2DUploadToScreen page aligned %p", src);
-		size_t aligned_size = PAGE_ALIGN(src_pitch * w);
-		struct etna_bo *aligned_bo = etna_bo_from_usermem_prot(v2d->dev, src, aligned_size, ETNA_USERPTR_READ);
-		if (aligned_bo) {
-			VIV2D_INFO_MSG("Viv2DUploadToScreen create usermem %p %x", src, aligned_size);
-			aligned_tmp.bo = aligned_bo;
-			aligned_tmp.width = w;
-			aligned_tmp.height = h;
-			aligned_tmp.pitch = src_pitch;
+//	uintptr_t pitch_start = ((uintptr_t)src / src_pitch) * src_pitch;
+//	uintptr_t page_start = ((uintptr_t)pitch_start / 4096) * 4096;
+	uintptr_t page_start = ((uintptr_t)src / (PAGE_SIZE * src_pitch)) * (PAGE_SIZE * src_pitch);
+	char *start_buf = (char *)page_start;
+//	if ((uintptr_t)src == ALIGN((uintptr_t)src, PAGE_SIZE)) {
 
-			tmp = &aligned_tmp;
+	src_x = (((uintptr_t)src - page_start) % src_pitch) / 4;
+	src_y = (((uintptr_t)src - page_start) / src_pitch);
+	size_t aligned_size = PAGE_ALIGN(src_pitch * (h + src_y + 1));
+	if (aligned_size < 1024 * 1024 * 32) {
+
+		VIV2D_INFO_MSG("Viv2DUploadToScreen page aligned %p %dx%d", src, src_x, src_y);
+		struct etna_bo *aligned_bo = etna_bo_from_usermem_prot(v2d->dev, start_buf, aligned_size, ETNA_USERPTR_READ);
+		if (aligned_bo) {
+			tmp = calloc(sizeof (*tmp), 1);
+			VIV2D_INFO_MSG("Viv2DUploadToScreen create usermem %p/%p %d %dx%d:%dx%d %x", start_buf, src, src_pitch, src_x, src_y, w, h, aligned_size);
+			tmp->bo = aligned_bo;
+			tmp->width = w;
+			tmp->height = h;
+			tmp->pitch = src_pitch;
 			use_usermem = 1;
 		} else {
+			src_x = 0;
+			src_y = 0;
 			VIV2D_INFO_MSG("Viv2DUploadToScreen cannot create usermem");
 			tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
 		}
 	} else {
+		src_x = 0;
+		src_y = 0;
+		VIV2D_INFO_MSG("Viv2DUploadToScreen cannot create usermem : two large alignement %ld", aligned_size);
 		tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
 	}
+//	} else {
+//		tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
+//	}
 #else
 	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
 #endif
@@ -758,7 +774,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	rects[0].y2 = y + h;
 
 	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1));
-	_Viv2DStreamSrc(v2d, tmp, 0, 0, tmp->width, tmp->height); // tmp source
+	_Viv2DStreamSrc(v2d, tmp, src_x, src_y, tmp->width, tmp->height); // tmp source
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
@@ -766,16 +782,19 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamCommit(v2d, TRUE);
 	exaMarkSync(pDst->drawable.pScreen);
 
-	if (use_usermem) {
-		etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
-		etna_bo_del(tmp->bo);
-	}
-
-	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
+	VIV2D_INFO_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
 	               pDst, etna_bo_map(dst->bo),
 	               src, src_pitch, tmp->pitch, x, y, w, h,
 	               pDst->drawable.width, pDst->drawable.height,
 	               pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+
+#ifdef VIV2D_USERPTR
+	if (use_usermem) {
+		etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
+		etna_bo_del(tmp->bo);
+		free(tmp);
+	}
+#endif
 
 	return TRUE;
 }
