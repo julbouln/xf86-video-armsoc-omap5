@@ -32,6 +32,8 @@
 //#define VIV2D_NON_RGBA_DEST_FIX 1
 //#define VIV2D_CPU_BO_CLEAR 1
 
+//#define VIV2D_SOFT_A8_DST 1
+
 //#define VIV2D_SUPPORT_A8_DST 1
 //#define VIV2D_SUPPORT_MONO 1
 

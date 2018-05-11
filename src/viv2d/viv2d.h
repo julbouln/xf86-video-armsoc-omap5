@@ -117,6 +117,8 @@ typedef struct _Viv2DOp {
 	Viv2DPixmapPrivPtr msk;
 	Viv2DPixmapPrivPtr dst;
 
+	Viv2DPixmapPrivPtr tmp_dst;
+
 	Viv2DFormat msk_fmt;
 	Viv2DFormat src_fmt;
 
