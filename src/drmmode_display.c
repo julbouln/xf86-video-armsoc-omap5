@@ -467,6 +467,7 @@ drmmode_show_cursor_image(xf86CrtcPtr crtc, Bool update_image)
 			h = crtc->mode.VDisplay - crtc_y;
 
 		/* note src coords (last 4 args) are in Q16 format */
+		/* NOTE: now sync, so there is slowndown https://e2e.ti.com/support/arm/sitara_arm/f/791/t/482571?AM5728-video-display-query */
 		drmModeSetPlane(drmmode->fd, cursor->ovr->plane_id,
 			drmmode_crtc->crtc_id, cursor->fb_id, 0,
 			crtc_x, crtc_y, w, h, src_x<<16, src_y<<16,

@@ -92,7 +92,7 @@ static int init_plane_for_cursor(int drm_fd, uint32_t plane_id) {
 			this_prop = drmModeGetProperty(drm_fd, props->props[i]);
 
 			if (this_prop) {
-				if (!strncmp(this_prop->name, "zpos",
+				if (!strncmp(this_prop->name, "zorder",
 				             DRM_PROP_NAME_LEN)) {
 					res = drmModeObjectSetProperty(drm_fd,
 					                               plane_id,
@@ -104,7 +104,6 @@ static int init_plane_for_cursor(int drm_fd, uint32_t plane_id) {
 				}
 				drmModeFreeProperty(this_prop);
 			}
-
 		}
 		drmModeFreeObjectProperties(props);
 	}
@@ -151,7 +150,7 @@ struct drmmode_interface omap_interface = {
 	CURSORW               /* cursor width */,
 	CURSORH               /* cursor_height */,
 	CURSORPAD             /* cursor padding */,
-	HWCURSOR_API_PLANE /* cursor_api */,
+	HWCURSOR_API_NONE 	  /* cursor_api */,
 	init_plane_for_cursor /* init_plane_for_cursor */,
 	0                     /* vblank_query_supported */,
 	create_custom_gem     /* create_custom_gem */,

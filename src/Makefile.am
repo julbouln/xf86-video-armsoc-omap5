@@ -49,12 +49,7 @@ omap5_drv_la_LTLIBRARIES = omap5_drv.la
 omap5_drv_la_LDFLAGS = -module -avoid-version -no-undefined
 omap5_drv_la_LIBADD = @XORG_LIBS@
 omap5_drv_ladir = @moduledir@/drivers
-DRMMODE_SRCS = drmmode_exynos/drmmode_exynos.c \
-	drmmode_pl111/drmmode_pl111.c \
-	drmmode_kirin/drmmode_kirin.c \
-	drmmode_sti/drmmode_sti.c \
-	drmmode_omap/drmmode_omap.c
-
+DRMMODE_SRCS = drmmode_omap/drmmode_omap.c
 
 omap5_drv_la_SOURCES = \
          drmmode_display.c \

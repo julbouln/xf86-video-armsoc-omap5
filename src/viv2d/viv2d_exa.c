@@ -1564,8 +1564,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		return FALSE;
 	}
 
-//	exaWaitSync(pDst->drawable.pScreen);
-
 	dst->refcnt++;
 
 	_Viv2DOpInit(&v2d->op);
@@ -1595,7 +1593,8 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	}
 
 	VIV2D_DBG_MSG("Viv2DPrepareComposite dst:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pDst,
-	              dst, dst->width, dst->height, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
+	              dst, dst->width, dst->height, 
+	              Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
 	              rop, pix_op_name(rop));
 
 	v2d->op.blend_op = &viv2d_blend_op[rop];
@@ -1708,7 +1707,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 	if (v2d->op.has_mask) {
 		// tmp 32bits argb pix
 		Viv2DPixmapPrivPtr tmp;
-		Viv2DPixmapPrivPtr tmp_dest;
 
 		Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
 		Viv2DBlendOp *msk_op = &viv2d_blend_op[PictOpInReverse];
@@ -1717,12 +1715,13 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
 		_Viv2DStreamClear(v2d, tmp);
 
-#ifdef VIV2D_NON_RGBA_FIX
+#ifdef VIV2D_NON_RGBA_DEST_FIX
 		// for some reasons, there is problem with non A8R8G8B8 surfaces
 		if ((v2d->op.src && v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
 		        (v2d->op.msk && v2d->op.msk_fmt.fmt != DE_FORMAT_A8R8G8B8) ||
 		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
+			Viv2DPixmapPrivPtr tmp_dest;
 			tmp_dest = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 			Viv2DSetFormat(32, 32, &tmp_dest->format); // A8R8G8B8
 			_Viv2DStreamClear(v2d, tmp_dest);
@@ -1732,8 +1731,10 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp,
 			                 NULL, srcX, srcY, width, height, mrect, 1);
+
 			_Viv2DStreamComp(v2d, v2d->op.msk_type, v2d->op.msk, &v2d->op.msk_fmt, v2d->op.mask, tmp,
 			                 msk_op, maskX, maskY, width, height, mrect, 1);
+
 			_Viv2DStreamComp(v2d, viv2d_src_pix, tmp, &tmp->format, 0, tmp_dest,
 			                 v2d->op.blend_op, 0, 0, width, height, mrect, 1);
 
@@ -1743,34 +1744,35 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 mask composite");
 
 		} else
-#endif
+#endif		
 		{
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp,
 			                 NULL, srcX, srcY, width, height, mrect, 1);
+
 			_Viv2DStreamComp(v2d, v2d->op.msk_type, v2d->op.msk, &v2d->op.msk_fmt, v2d->op.mask, tmp,
 			                 msk_op, maskX, maskY, width, height, mrect, 1);
+
 			_Viv2DStreamComp(v2d, viv2d_src_pix, tmp, &tmp->format, 0, v2d->op.dst,
 			                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
 		}
 
 	} else {
-#ifdef VIV2D_NON_RGBA_FIX
 		// we need to use intermediary surfaces if dst or src is not A8R8G8B8
 		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 ||
 		        v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
-			Viv2DPixmapPrivPtr tmp;
-			Viv2DPixmapPrivPtr tmp_dest;
-
 			if (v2d->op.src_type == viv2d_src_pix) {
+				Viv2DPixmapPrivPtr tmp;
 				Viv2DBlendOp *cpy_op = &viv2d_blend_op[PictOpSrc];
 
 				tmp = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 				Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
 				_Viv2DStreamClear(v2d, tmp);
 
+#ifdef VIV2D_NON_RGBA_DEST_FIX
 				// we need to use an intermediary surface if dst is not A8R8G8B8
 				if (v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8) {
+					Viv2DPixmapPrivPtr tmp_dest;
 					tmp_dest = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 					Viv2DSetFormat(32, 32, &tmp_dest->format); // A8R8G8B8
 					_Viv2DStreamClear(v2d, tmp_dest);
@@ -1780,15 +1782,19 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 					_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp,
 					                 cpy_op, srcX, srcY, width, height, mrect, 1);
+
 					_Viv2DStreamComp(v2d, viv2d_src_pix, tmp, &tmp->format, 0, tmp_dest,
 					                 v2d->op.blend_op, 0, 0, width, height, mrect, 1);
 
 					_Viv2DStreamComp(v2d, viv2d_src_pix, tmp_dest, &tmp_dest->format, 0, v2d->op.dst,
 					                 cpy_op, 0, 0, width, height, drect, 1);
 
-				} else {
+				} else 
+#endif
+				{
 					_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp,
 					                 cpy_op, srcX, srcY, width, height, mrect, 1);
+
 					_Viv2DStreamComp(v2d, viv2d_src_pix, tmp, &tmp->format, 0, v2d->op.dst,
 					                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
 				}
@@ -1800,15 +1806,16 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 src composite");
 
 		} else
-#endif
 		{
 			// new srcX,srcY group
-			if (v2d->op.prev_src_x != srcX || v2d->op.prev_src_y != srcY || v2d->op.cur_rect >= VIV2D_MAX_RECTS)
+			if (v2d->op.prev_src_x != srcX || v2d->op.prev_src_y != srcY || 
+				v2d->op.cur_rect >= VIV2D_MAX_RECTS)
 			{
 				// stream previous rects
 				if (v2d->op.prev_src_x > -1) {
 					_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
-					                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
+					                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, 
+					                 v2d->op.rects, v2d->op.cur_rect);
 
 					v2d->op.cur_rect = 0;
 				}
@@ -1851,11 +1858,10 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		VIV2D_DBG_MSG("Viv2DDoneComposite with msk dst:%p %d", pDst, v2d->stream->offset);
 		// already done masked operations
 	} else {
-#ifdef VIV2D_NON_RGBA_FIX
-		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
+		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 || 
+			v2d->op.dst->format.fmt != DE_FORMAT_A8R8G8B8)
 		{
 		} else
-#endif
 		{
 			_Viv2DStreamComp(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, v2d->op.dst,
 			                 v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height,
