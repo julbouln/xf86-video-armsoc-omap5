@@ -305,8 +305,20 @@ void Viv2DPrepareSoftAlpha(Viv2DRec *v2d) {
 	v2d->op.tmp_dst->width = v2d->op.dst->width;
 	v2d->op.tmp_dst->height = v2d->op.dst->height;
 	v2d->op.tmp_dst->pitch = ALIGN(v2d->op.tmp_dst->width  * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
+#ifdef VIV2D_CACHE_BO
 	v2d->op.tmp_dst->bo = Viv2DCacheNewBo(v2d, v2d->op.tmp_dst->pitch * v2d->op.tmp_dst->height);
+#else
+	v2d->op.tmp_dst->bo = etna_bo_new(v2d->dev, v2d->op.tmp_dst->pitch * v2d->op.tmp_dst->height);
+#endif
 	Viv2DSetFormat(32, 32, &v2d->op.tmp_dst->format); // A8R8G8B8
+	Viv2DRect rects[1];
+	rects[0].x1 = 0;
+	rects[0].y1 = 0;
+	rects[0].x2 = v2d->op.dst->width;
+	rects[0].y2 = v2d->op.dst->height;
+	//_Viv2DStreamClear(v2d, v2d->op.tmp_dst);
+	_Viv2DStreamCopy(v2d, v2d->op.dst, v2d->op.tmp_dst, &viv2d_blend_op[PictOpSrc], 0, 0, v2d->op.dst->width, v2d->op.dst->height, rects, 1);
+
 }
 
 void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
@@ -321,7 +333,7 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 	etna_bo_cpu_prep(v2d->op.tmp_dst->bo, DRM_ETNA_PREP_READ);
 	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_WRITE);
 
-	while(h--) {
+	while (h--) {
 		ARGBExtractAlphaRow_NEON(tmp_dest_buf, dest_buf, w);
 		tmp_dest_buf += tmp_pitch;
 		dest_buf += dst_pitch;
@@ -333,7 +345,11 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 }
 
 void Viv2DFinishSoftAlpha(Viv2DRec *v2d) {
+#ifdef VIV2D_CACHE_BO
 	Viv2DCacheDelBo(v2d, v2d->op.tmp_dst->bo);
+#else
+	etna_bo_del(v2d->op.tmp_dst->bo);
+#endif
 	free(v2d->op.tmp_dst);
 	v2d->op.tmp_dst = NULL;
 }
@@ -457,7 +473,6 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 		// flush if remaining state
 		if (pix->bo) {
 			_Viv2DStreamCommit(v2d, TRUE);
-//			etna_bo_wait(v2d->dev, v2d->pipe, pix->bo);
 			etna_bo_cpu_prep(pix->bo, idx2op(index));
 		}
 		pix->refcnt = -1;
@@ -562,11 +577,13 @@ static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 		Viv2DRec *v2d = v2d_exa->v2d;
 		struct etna_bo *bo = (struct etna_bo *)buf->priv;
+		if(bo) {
 #ifdef VIV2D_CACHE_BO
 		Viv2DCacheDelBo(v2d, bo);
 #else
 		etna_bo_del(bo);
 #endif
+		}
 	} else {
 		VIV2D_DBG_MSG("Viv2DFreeBuf: buf too small %p %d", buf, buf->size);
 		if (buf->buf)
@@ -1126,8 +1143,8 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
 
 	/*
-			_Viv2DStreamCommit(v2d, TRUE);
-			exaMarkSync(pPixmap->drawable.pScreen);
+		_Viv2DStreamCommit(v2d, TRUE);
+		exaMarkSync(pPixmap->drawable.pScreen);
 	*/
 }
 /** @} */

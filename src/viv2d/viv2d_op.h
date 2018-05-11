@@ -272,11 +272,11 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 //		_Viv2DStreamReserve(v2d->stream, 10);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
 		               VIVS_DE_ALPHA_CONTROL_ENABLE_OFF);
-/*		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES, 0);
-		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, 0);
-		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, 0);
-		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, 0);
-		*/
+		/*		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES, 0);
+				etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, 0);
+				etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, 0);
+				etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, 0);
+				*/
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp disabled");
 	}
 }
@@ -406,7 +406,7 @@ static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 		rect[0].x2 = pix->width;
 		rect[0].y2 = pix->height;
 
-		_Viv2DStreamSolid(v2d, pix, 0xff000000, rect, 1);
+		_Viv2DStreamSolid(v2d, pix, 0x00000000, rect, 1);
 	}
 }
 
@@ -470,7 +470,6 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 			if (!v2d->cache[i].used) {
 //				VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
 //				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
-//				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
 				etna_bo_del(v2d->cache[i].bo);
 				v2d->cache_size -= v2d->cache[i].size;
 				v2d->cache[i].used = 1;
@@ -492,6 +491,20 @@ static inline void Viv2DCacheDelBo(Viv2DPtr v2d, struct etna_bo *bo) {
 	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 		if (v2d->cache[i].bo == bo) {
 			v2d->cache[i].used = 0;
+#ifdef VIV2D_GPU_BO_CLEAR
+//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
+			int asize = ALIGN(v2d->cache[i].size, 4096) / 4;
+			Viv2DPixmapPrivRec pix;
+			pix.bo = bo;
+			pix.width = 32;
+			pix.height = asize / 32;
+			pix.pitch = 32 * 4;
+			pix.format.bpp = 32;
+			pix.format.depth = 32;
+			pix.format.swizzle = DE_SWIZZLE_ARGB;
+			pix.format.fmt = DE_FORMAT_A8R8G8B8;
+			_Viv2DStreamClear(v2d, &pix);
+#endif
 			return;
 		}
 	}
