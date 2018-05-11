@@ -450,23 +450,11 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 		}
 	}
 
-	if (v2d->cache_size > VIV2D_CACHE_MAX) {
-		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-			if (!v2d->cache[i].used) {
-//				VIV2D_INFO_MSG("Viv2DCacheNewBo: clean %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
-				etna_bo_del(v2d->cache[i].bo);
-				v2d->cache_size -= v2d->cache[i].size;
-				v2d->cache[i].size = 0;
-			}
-		}
-	}
-
 	// recycle
 	if (!bo) {
 		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
 			if (!v2d->cache[i].used) {
-//				VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
-//				etna_bo_wait(v2d->dev, v2d->pipe, v2d->cache[i].bo);
+				// VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
 				etna_bo_del(v2d->cache[i].bo);
 				v2d->cache_size -= v2d->cache[i].size;
 				v2d->cache[i].used = 1;
@@ -476,7 +464,17 @@ static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
 				return bo;
 			}
 		}
+	}
 
+	if (v2d->cache_size > VIV2D_CACHE_MAX) {
+		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
+			if (!v2d->cache[i].used) {
+//				VIV2D_INFO_MSG("Viv2DCacheNewBo: clean %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
+				etna_bo_del(v2d->cache[i].bo);
+				v2d->cache_size -= v2d->cache[i].size;
+				v2d->cache[i].size = 0;
+			}
+		}
 	}
 
 	VIV2D_INFO_MSG("Viv2DCacheNewBo: cannot get a cached bo");
