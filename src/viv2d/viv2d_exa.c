@@ -577,11 +577,11 @@ static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 		Viv2DRec *v2d = v2d_exa->v2d;
 		struct etna_bo *bo = (struct etna_bo *)buf->priv;
-		if(bo) {
+		if (bo) {
 #ifdef VIV2D_CACHE_BO
-		Viv2DCacheDelBo(v2d, bo);
+			Viv2DCacheDelBo(v2d, bo);
 #else
-		etna_bo_del(bo);
+			etna_bo_del(bo);
 #endif
 		}
 	} else {
@@ -857,8 +857,8 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-	_Viv2DStreamCommit(v2d, TRUE);
-	exaMarkSync(pDst->drawable.pScreen);
+//	_Viv2DStreamCommit(v2d, TRUE);
+//	exaMarkSync(pDst->drawable.pScreen);
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
 	              pDst, etna_bo_map(dst->bo),
@@ -956,8 +956,11 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
+
 	_Viv2DStreamCommit(v2d, TRUE);
-	_Viv2DStreamWait(v2d);
+	//_Viv2DStreamWait(v2d);
+
+	etna_bo_cpu_prep(tmp->bo, DRM_ETNA_PREP_READ);
 
 	dst_buf = dst;
 	buf = (char *) etna_bo_map(tmp->bo);
@@ -968,6 +971,8 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 		dst_buf += dst_pitch;
 		buf += pitch;
 	}
+
+	etna_bo_cpu_fini(tmp->bo);
 
 	_Viv2OpClearTmpPix(v2d);
 
@@ -1325,8 +1330,8 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 
 	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
 
-	_Viv2DStreamCommit(v2d, TRUE);
-	exaMarkSync(pDstPixmap->drawable.pScreen);
+//	_Viv2DStreamCommit(v2d, TRUE);
+//	exaMarkSync(pDstPixmap->drawable.pScreen);
 }
 /** @} */
 #else
@@ -2034,8 +2039,8 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 	}
 #endif
 
-	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
-	exaMarkSync(pDst->drawable.pScreen);
+//	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
+//	exaMarkSync(pDst->drawable.pScreen);
 }
 
 #else
@@ -2401,6 +2406,18 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 }
 #endif
 
+static void Viv2DFlushCallback(CallbackListPtr *list, pointer user_data,
+                               pointer call_data)
+{
+	ScrnInfoPtr pScrn = user_data;
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
+
+//	VIV2D_INFO_MSG("flush callback");
+	_Viv2DStreamWait(v2d);
+	_Viv2DStreamCommit(v2d, TRUE);
+}
+
 struct ARMSOCEXARec *
 InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 {
@@ -2461,10 +2478,16 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 
 	exa = exaDriverAlloc();
 	if (!exa) {
+		VIV2D_ERR_MSG("cannot alloc EXA driver");
 		goto fail;
 	}
 
 	v2d_exa->exa = exa;
+
+	if (!AddCallback(&FlushCallback, Viv2DFlushCallback, pScrn)) {
+		VIV2D_ERR_MSG("cannot add flush callback");
+		goto fail;
+	}
 
 	exa->exa_major = EXA_VERSION_MAJOR;
 	exa->exa_minor = EXA_VERSION_MINOR;

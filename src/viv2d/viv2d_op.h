@@ -102,9 +102,6 @@ static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
 static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 	VIV2D_DBG_MSG("_Viv2DStreamCommit %d %d (%d)", async, etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	if (etna_cmd_stream_offset(v2d->stream) > 0) {
-//		for(int i=0;i<20;i++) {
-//			etna_nop(v2d->stream);
-//		}
 		VIV2D_DBG_MSG("_Viv2DStreamCommit flush start %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
 		VIV2D_DBG_MSG("_Viv2DStreamCommit flush end %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
@@ -536,7 +533,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 
 	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix achieved %d %d", v2d->tmp_pix_cnt, v2d->stream->offset);
-		_Viv2DStreamCommit(v2d, FALSE);
+		_Viv2DStreamCommit(v2d, TRUE);
 		_Viv2OpClearTmpPix(v2d);
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix commit %d", v2d->tmp_pix_cnt);
 	}
