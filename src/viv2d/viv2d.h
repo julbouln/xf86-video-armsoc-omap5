@@ -147,11 +147,6 @@ typedef struct _Viv2DRec {
 
 	Viv2DPixmapPrivRec tmp_pix[VIV2D_MAX_TMP_PIX];
 	int tmp_pix_cnt;
-
-#ifdef VIV2D_CACHE_BO
-	Viv2DBoCacheEntry cache[VIV2D_CACHE_SIZE];
-	size_t cache_size;
-#endif
 } Viv2DRec, *Viv2DPtr;
 
 

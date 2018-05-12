@@ -175,14 +175,9 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 
 		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
-			if (armsocPix->bo && pix->bo) {
-				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
-				Viv2DSetFormat(32, 32, &pix->format);
-#ifdef VIV2D_CACHE_BO
-				Viv2DCacheDelBo(v2d, pix->bo);
-#else
+			VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
+			if (armsocPix->bo && pix->bo) { // dmabuf bo
 				etna_bo_del(pix->bo);
-#endif
 				pix->bo = NULL;
 			}
 		}
@@ -306,7 +301,7 @@ void Viv2DPrepareSoftAlpha(Viv2DRec *v2d) {
 	v2d->op.tmp_dst->height = v2d->op.dst->height;
 	v2d->op.tmp_dst->pitch = ALIGN(v2d->op.tmp_dst->width  * ((32 + 7) / 8), VIV2D_PITCH_ALIGN);
 #ifdef VIV2D_CACHE_BO
-	v2d->op.tmp_dst->bo = Viv2DCacheNewBo(v2d, v2d->op.tmp_dst->pitch * v2d->op.tmp_dst->height);
+	v2d->op.tmp_dst->bo = etna_bo_cache_new(v2d->dev, v2d->op.tmp_dst->pitch * v2d->op.tmp_dst->height);
 #else
 	v2d->op.tmp_dst->bo = etna_bo_new(v2d->dev, v2d->op.tmp_dst->pitch * v2d->op.tmp_dst->height);
 #endif
@@ -330,8 +325,8 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 	int tmp_pitch = v2d->op.tmp_dst->pitch;
 	int dst_pitch = v2d->op.dst->pitch;
 
-	etna_bo_cpu_prep(v2d->op.tmp_dst->bo, DRM_ETNA_PREP_READ);
-	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_WRITE);
+	etna_bo_cpu_prep(v2d->op.tmp_dst->bo, DRM_ETNA_PREP_READ, 5000000000);
+	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_WRITE, 5000000000);
 
 	while (h--) {
 		ARGBExtractAlphaRow_NEON(tmp_dest_buf, dest_buf, w);
@@ -346,7 +341,7 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 
 void Viv2DFinishSoftAlpha(Viv2DRec *v2d) {
 #ifdef VIV2D_CACHE_BO
-	Viv2DCacheDelBo(v2d, v2d->op.tmp_dst->bo);
+	etna_bo_cache_del(v2d->dev, v2d->op.tmp_dst->bo);
 #else
 	etna_bo_del(v2d->op.tmp_dst->bo);
 #endif
@@ -473,7 +468,7 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 		// flush if remaining state
 		if (pix->bo) {
 			_Viv2DStreamCommit(v2d, TRUE);
-			etna_bo_cpu_prep(pix->bo, idx2op(index));
+			etna_bo_cpu_prep(pix->bo, idx2op(index), 5000000000);
 		}
 		pix->refcnt = -1;
 	}
@@ -573,13 +568,13 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 
 static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 	VIV2D_DBG_MSG("Viv2DFreeBuf: %p", buf);
-	if (buf->size > VIV2D_MIN_SIZE) {
+	if (buf->priv) {
 		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 		Viv2DRec *v2d = v2d_exa->v2d;
 		struct etna_bo *bo = (struct etna_bo *)buf->priv;
 		if (bo) {
 #ifdef VIV2D_CACHE_BO
-			Viv2DCacheDelBo(v2d, bo);
+			etna_bo_cache_del(v2d->dev, bo);
 #else
 			etna_bo_del(bo);
 #endif
@@ -610,7 +605,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 		struct etna_bo *bo;
 		//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
 #ifdef VIV2D_CACHE_BO
-		bo = Viv2DCacheNewBo(v2d, size);
+		bo = etna_bo_cache_new(v2d->dev, size);
 #else
 		bo = etna_bo_new(v2d->dev, size, ETNA_BO_UNCACHED);
 #endif
@@ -868,7 +863,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 #ifdef VIV2D_USERPTR
 	if (use_usermem) {
-		etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
+		etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo, 5000000000);
 		etna_bo_del(tmp->bo);
 		free(tmp);
 	}
@@ -956,11 +951,10 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-
 	_Viv2DStreamCommit(v2d, TRUE);
-	//_Viv2DStreamWait(v2d);
+	_Viv2DStreamWait(v2d);
 
-	etna_bo_cpu_prep(tmp->bo, DRM_ETNA_PREP_READ);
+	etna_bo_cpu_prep(tmp->bo, DRM_ETNA_PREP_READ, 5000000000);
 
 	dst_buf = dst;
 	buf = (char *) etna_bo_map(tmp->bo);
@@ -1833,7 +1827,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 		tmp = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 		Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
-		_Viv2DStreamClear(v2d, tmp);
+//		_Viv2DStreamClear(v2d, tmp);
 
 #ifdef VIV2D_NON_RGBA_DEST_FIX
 		// for some reasons, there is problem with non A8R8G8B8 surfaces
@@ -1844,7 +1838,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			Viv2DPixmapPrivPtr tmp_dest;
 			tmp_dest = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 			Viv2DSetFormat(32, 32, &tmp_dest->format); // A8R8G8B8
-			_Viv2DStreamClear(v2d, tmp_dest);
+//			_Viv2DStreamClear(v2d, tmp_dest);
 
 			_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.dst, &v2d->op.dst->format, 0, tmp_dest,
 			                 NULL, dstX, dstY, width, height, mrect, 1);
@@ -1897,7 +1891,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 
 				tmp = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 				Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
-				_Viv2DStreamClear(v2d, tmp);
+//				_Viv2DStreamClear(v2d, tmp);
 
 #ifdef VIV2D_NON_RGBA_DEST_FIX
 				// we need to use an intermediary surface if dst is not A8R8G8B8
@@ -1905,7 +1899,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 					Viv2DPixmapPrivPtr tmp_dest;
 					tmp_dest = _Viv2DOpCreateTmpPix(v2d, width, height, 32);
 					Viv2DSetFormat(32, 32, &tmp_dest->format); // A8R8G8B8
-					_Viv2DStreamClear(v2d, tmp_dest);
+//					_Viv2DStreamClear(v2d, tmp_dest);
 
 					_Viv2DStreamComp(v2d, viv2d_src_pix, v2d->op.dst, &v2d->op.dst->format, 0, tmp_dest,
 					                 NULL, dstX, dstY, width, height, mrect, 1);
@@ -2465,10 +2459,6 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		ERROR_MSG("Viv2DEXA: Failed to create stream");
 		goto fail;
 	}
-
-#ifdef VIV2D_CACHE_BO
-	Viv2DCacheInit(v2d);
-#endif
 
 	scanoutFD = armsoc_bo_get_dmabuf(pARMSOC->scanout);
 	v2d->bo = etna_bo_from_dmabuf(v2d->dev, scanoutFD);

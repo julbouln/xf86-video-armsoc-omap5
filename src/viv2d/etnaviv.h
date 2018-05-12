@@ -3,8 +3,27 @@
 #include "etnaviv_drmif.h"
 #include "etnaviv_drm.h"
 
+#define ETNA_BO_CACHE_SIZE 1024*2
+#define ETNA_BO_CACHE_MAX 1024*1024*128
+
+#define ETNA_PIPE_BOS_SIZE 1024*4
+
+enum etna_bo_state {
+	ETNA_BO_READY,
+	ETNA_BO_STREAMED,
+	ETNA_BO_FLUSHED
+};
+
+struct etna_bo_cache {
+	struct etna_bo *bo;
+	int size;
+	int used;
+};
+
 struct etna_device {
 	int fd;
+	struct etna_bo_cache cache[ETNA_BO_CACHE_SIZE];
+	uint32_t cache_size;
 };
 
 struct etna_bo {
@@ -18,6 +37,7 @@ struct etna_bo {
 
 	struct etna_cmd_stream *current_stream;
 	uint32_t idx;
+	uint32_t state;
 };
 
 struct etna_gpu {
@@ -30,6 +50,8 @@ struct etna_gpu {
 struct etna_pipe {
 	enum etna_pipe_id id;
 	struct etna_gpu *gpu;
+	struct etna_bo *bos[ETNA_PIPE_BOS_SIZE];
+	uint32_t nr_bos;
 };
 
 struct etna_cmd_stream_priv {

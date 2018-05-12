@@ -16,21 +16,22 @@ simplified etnaviv drm based on libdrm
 #include "etnaviv.h"
 #include "etnaviv_drmif.h"
 
+#include "xf86.h"
+
 #define ALIGN(v,a) (((v) + (a) - 1) & ~((a) - 1))
-#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define INFO_MSG(fmt, ...) \
-		do { drmMsg("[I] "fmt " (%s:%d)\n", \
-				##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+		do { xf86Msg(X_INFO, fmt "\n",\
+				##__VA_ARGS__); } while (0)
 #define DEBUG_MSG(fmt, ...) \
-		do if (enable_debug) { drmMsg("[D] "fmt " (%s:%d)\n", \
-				##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+		do { xf86Msg(X_INFO, fmt "\n",\
+				##__VA_ARGS__); } while (0)
 #define WARN_MSG(fmt, ...) \
-		do { drmMsg("[W] "fmt " (%s:%d)\n", \
-				##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+		do { xf86Msg(X_WARNING, fmt "\n",\
+				##__VA_ARGS__); } while (0)
 #define ERROR_MSG(fmt, ...) \
-		do { drmMsg("[E] " fmt " (%s:%d)\n", \
-				##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+		do { xf86Msg(X_ERROR, fmt "\n",\
+				##__VA_ARGS__); } while (0)
 
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
 
@@ -45,6 +46,16 @@ struct etna_device *etna_device_new(int fd)
 		return NULL;
 
 	dev->fd = fd;
+
+	INFO_MSG("etna_device_new init device");
+
+	dev->cache_size = 0;
+	for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+		dev->cache[i].bo = NULL;
+		dev->cache[i].size = 0;
+		dev->cache[i].used = 0;
+	}
+	INFO_MSG("etna_device_new init cache");
 
 	return dev;
 }
@@ -215,6 +226,11 @@ int etna_pipe_wait_ns(struct etna_pipe *pipe, uint32_t timestamp, uint64_t ns)
 		return ret;
 	}
 
+	for (int i = 0; i < pipe->nr_bos; i++) {
+		pipe->bos[i]->state = ETNA_BO_READY;
+	}
+	pipe->nr_bos = 0;
+
 	return 0;
 }
 
@@ -240,6 +256,7 @@ struct etna_pipe *etna_pipe_new(struct etna_gpu *gpu, enum etna_pipe_id id)
 
 	pipe->id = id;
 	pipe->gpu = gpu;
+	pipe->nr_bos = 0;
 
 	return pipe;
 fail:
@@ -362,6 +379,8 @@ static uint32_t bo2idx(struct etna_cmd_stream *stream, struct etna_bo *bo,
 
 	pthread_mutex_lock(&idx_lock);
 
+	bo->state = ETNA_BO_STREAMED;
+
 	if (!bo->current_stream) {
 		idx = append_bo(stream, bo);
 		bo->current_stream = stream;
@@ -426,7 +445,14 @@ static void flush(struct etna_cmd_stream *stream, int in_fence_fd,
 		struct etna_bo *bo = priv->bos[i];
 
 		bo->current_stream = NULL;
-//		etna_bo_del(bo);
+		bo->state = ETNA_BO_FLUSHED;
+
+		if (priv->pipe->nr_bos < ETNA_PIPE_BOS_SIZE) {
+			priv->pipe->bos[priv->pipe->nr_bos] = bo;
+			priv->pipe->nr_bos++;
+		} else {
+			ERROR_MSG("pipe bos array full");
+		}
 	}
 
 	if (out_fence_fd)
@@ -472,6 +498,97 @@ void etna_cmd_stream_reloc(struct etna_cmd_stream *stream, const struct etna_rel
 	etna_cmd_stream_emit(stream, addr);
 }
 
+// cache
+
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
+	struct etna_bo *bo;
+	int i;
+	bo = NULL;
+
+	for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+		// free to use
+		if (!dev->cache[i].used && ALIGN(size, 4096) == dev->cache[i].size && dev->cache[i].bo->state == ETNA_BO_READY) {
+//			INFO_MSG("etna_bo_cache_new: reuse %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, size);
+			dev->cache[i].used = 1;
+			bo = dev->cache[i].bo;
+#ifdef ETNA_BO_CPU_CLEAR
+			// FIXME: the GPU should do that
+			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE, 5000000000);
+			char *buf = etna_bo_map(bo);
+			neon_memset(buf, 0, size);
+			etna_bo_cpu_fini(bo);
+#endif
+			return bo;
+		}
+		// empty entry
+		if (dev->cache[i].size == 0) {
+			dev->cache[i].used = 1;
+			dev->cache[i].size = ALIGN(size, 4096);
+			dev->cache_size += dev->cache[i].size;
+			bo = dev->cache[i].bo = etna_bo_new(dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
+//			INFO_MSG("etna_bo_cache_new: create %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, size);
+			return bo;
+		}
+	}
+
+	// recycle
+	if (!bo) {
+		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+			if (!dev->cache[i].used && dev->cache[i].bo->state == ETNA_BO_READY) {
+//				INFO_MSG("etna_bo_cache_new: recycle %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, ALIGN(size, 4096));
+				etna_bo_del(dev->cache[i].bo);
+				dev->cache_size -= dev->cache[i].size;
+				dev->cache[i].used = 1;
+				dev->cache[i].size = ALIGN(size, 4096);
+				dev->cache_size += dev->cache[i].size;
+				bo = dev->cache[i].bo = etna_bo_new(dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
+				return bo;
+			}
+		}
+	}
+
+	if (dev->cache_size > ETNA_BO_CACHE_MAX) {
+		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+			if (!dev->cache[i].used && dev->cache[i].bo->state == ETNA_BO_READY) {
+//				INFO_MSG("etna_bo_cache_new: clean %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, ALIGN(size, 4096));
+				etna_bo_del(dev->cache[i].bo);
+				dev->cache_size -= dev->cache[i].size;
+				dev->cache[i].size = 0;
+				dev->cache[i].bo = NULL;
+			}
+		}
+	}
+
+	ERROR_MSG("etna_bo_cache_new: cannot create bo %ld", dev->cache_size);
+
+	return bo;
+}
+
+void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
+	for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+		if (dev->cache[i].bo == bo) {
+			dev->cache[i].used = 0;
+//			INFO_MSG("etna_bo_cache_del: del %d %ld %p", i, dev->cache_size, dev->cache[i].bo);
+
+#ifdef ETNA_BO_GPU_CLEAR
+//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
+			int asize = ALIGN(dev->cache[i].size, 4096) / 4;
+			Viv2DPixmapPrivRec pix;
+			pix.bo = bo;
+			pix.width = 32;
+			pix.height = asize / 32;
+			pix.pitch = 32 * 4;
+			pix.format.bpp = 32;
+			pix.format.depth = 32;
+			pix.format.swizzle = DE_SWIZZLE_ARGB;
+			pix.format.fmt = DE_FORMAT_A8R8G8B8;
+			_Viv2DStreamClear(dev, &pix);
+#endif
+			return;
+		}
+	}
+}
+
 // bo
 
 /* get buffer info */
@@ -505,6 +622,7 @@ static struct etna_bo *bo_from_handle(struct etna_device *dev,
 	bo->size = size;
 	bo->handle = handle;
 	bo->flags = flags;
+	bo->state = ETNA_BO_READY;
 
 	return bo;
 }
@@ -599,14 +717,14 @@ struct etna_bo *etna_bo_from_dmabuf(struct etna_device *dev, int fd)
 	return bo;
 }
 
-int etna_bo_cpu_prep(struct etna_bo *bo, uint32_t op)
+int etna_bo_cpu_prep(struct etna_bo *bo, uint32_t op, uint64_t ns)
 {
 	struct drm_etnaviv_gem_cpu_prep req = {
 		.handle = bo->handle,
 		.op = op,
 	};
 
-	get_abs_timeout(&req.timeout, 5000000000);
+	get_abs_timeout(&req.timeout, ns);
 
 	return drmCommandWrite(bo->dev->fd, DRM_ETNAVIV_GEM_CPU_PREP,
 	                       &req, sizeof(req));
@@ -642,7 +760,7 @@ void etna_bo_del(struct etna_bo *bo)
 
 /* extra */
 
-void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo) {
+void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns) {
 	int err;
 	struct drm_etnaviv_gem_wait req = {
 		.pipe = pipe->gpu->core,
@@ -652,7 +770,7 @@ void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_b
 		.timeout = 0
 	};
 
-	get_abs_timeout(&req.timeout, 5000000000);
+	get_abs_timeout(&req.timeout, ns);
 
 	err = drmCommandWrite(dev->fd, DRM_ETNAVIV_GEM_WAIT,
 	                      &req, sizeof(req));

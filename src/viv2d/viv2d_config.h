@@ -5,8 +5,6 @@
 #define VIV2D_PITCH_ALIGN 32
 
 #define VIV2D_CACHE_BO 1
-#define VIV2D_CACHE_SIZE 1024
-#define VIV2D_CACHE_MAX 1024*1024*128
 
 // EXA config
 #define VIV2D_MARKER 1

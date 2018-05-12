@@ -407,105 +407,6 @@ static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 	}
 }
 
-
-#ifdef VIV2D_CACHE_BO
-static inline void Viv2DCacheInit(Viv2DPtr v2d) {
-	int i;
-	v2d->cache_size = 0;
-	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-		v2d->cache[i].bo = NULL;
-		v2d->cache[i].size = 0;
-		v2d->cache[i].used = 0;
-	}
-}
-
-static inline struct etna_bo *Viv2DCacheNewBo(Viv2DPtr v2d, int size) {
-	struct etna_bo *bo;
-	int i;
-	bo = NULL;
-
-	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-		// free to use
-		if (!v2d->cache[i].used && ALIGN(size, 4096) == v2d->cache[i].size) {
-//			VIV2D_INFO_MSG("Viv2DCacheNewBo: reuse %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
-			v2d->cache[i].used = 1;
-			bo = v2d->cache[i].bo;
-#ifdef VIV2D_CPU_BO_CLEAR
-			// FIXME: the GPU should do that
-			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE);
-			char *buf = etna_bo_map(bo);
-			neon_memset(buf, 0, size);
-			etna_bo_cpu_fini(bo);
-#endif
-			return bo;
-		}
-		// empty entry
-		if (v2d->cache[i].size == 0) {
-			v2d->cache[i].used = 1;
-			v2d->cache[i].size = ALIGN(size, 4096);
-			v2d->cache_size += v2d->cache[i].size;
-			bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
-//			VIV2D_INFO_MSG("Viv2DCacheNewBo: create %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, size);
-			return bo;
-		}
-	}
-
-	// recycle
-	if (!bo) {
-		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-			if (!v2d->cache[i].used) {
-				// VIV2D_INFO_MSG("Viv2DCacheNewBo: recycle %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
-				etna_bo_del(v2d->cache[i].bo);
-				v2d->cache_size -= v2d->cache[i].size;
-				v2d->cache[i].used = 1;
-				v2d->cache[i].size = ALIGN(size, 4096);
-				v2d->cache_size += v2d->cache[i].size;
-				bo = v2d->cache[i].bo = etna_bo_new(v2d->dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
-				return bo;
-			}
-		}
-	}
-
-	if (v2d->cache_size > VIV2D_CACHE_MAX) {
-		for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-			if (!v2d->cache[i].used) {
-//				VIV2D_INFO_MSG("Viv2DCacheNewBo: clean %d %ld %p %d->%d", i, v2d->cache_size, v2d->cache[i].bo, v2d->cache[i].size, ALIGN(size, 4096));
-				etna_bo_del(v2d->cache[i].bo);
-				v2d->cache_size -= v2d->cache[i].size;
-				v2d->cache[i].size = 0;
-			}
-		}
-	}
-
-	VIV2D_INFO_MSG("Viv2DCacheNewBo: cannot get a cached bo");
-	return bo;
-}
-
-static inline void Viv2DCacheDelBo(Viv2DPtr v2d, struct etna_bo *bo) {
-	int i;
-	for (i = 0; i < VIV2D_CACHE_SIZE; i++) {
-		if (v2d->cache[i].bo == bo) {
-			v2d->cache[i].used = 0;
-#ifdef VIV2D_GPU_BO_CLEAR
-//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
-			int asize = ALIGN(v2d->cache[i].size, 4096) / 4;
-			Viv2DPixmapPrivRec pix;
-			pix.bo = bo;
-			pix.width = 32;
-			pix.height = asize / 32;
-			pix.pitch = 32 * 4;
-			pix.format.bpp = 32;
-			pix.format.depth = 32;
-			pix.format.swizzle = DE_SWIZZLE_ARGB;
-			pix.format.fmt = DE_FORMAT_A8R8G8B8;
-			_Viv2DStreamClear(v2d, &pix);
-#endif
-			return;
-		}
-	}
-}
-#endif
-
 static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 	if (v2d->tmp_pix_cnt > 0) {
 		do {
@@ -517,7 +418,7 @@ static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
 
 			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d", tmp->bo, v2d->tmp_pix_cnt);
 #ifdef VIV2D_CACHE_BO
-			Viv2DCacheDelBo(v2d, tmp->bo);
+			etna_bo_cache_del(v2d->dev, tmp->bo);
 #else
 			etna_bo_del(tmp->bo);
 #endif
@@ -531,7 +432,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 
 	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix achieved %d %d", v2d->tmp_pix_cnt, v2d->stream->offset);
-		_Viv2DStreamCommit(v2d, TRUE);
+//		_Viv2DStreamCommit(v2d, TRUE);
 		_Viv2OpClearTmpPix(v2d);
 //		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix commit %d", v2d->tmp_pix_cnt);
 	}
@@ -539,7 +440,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
 #ifdef VIV2D_CACHE_BO
-	tmp->bo = Viv2DCacheNewBo(v2d, pitch * height);
+	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
 #else
 	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
 #endif
