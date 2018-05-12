@@ -392,7 +392,6 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 	_Viv2DStreamBlendOp(v2d, blend_op, src_alpha, dst_alpha, src_global, dst_global);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
 	_Viv2DStreamFlush(v2d);
-
 }
 
 static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
@@ -407,37 +406,21 @@ static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 	}
 }
 
-static inline void _Viv2OpClearTmpPix(Viv2DPtr v2d) {
-	if (v2d->tmp_pix_cnt > 0) {
-		do {
-			Viv2DPixmapPrivPtr tmp;
-			v2d->tmp_pix_cnt--;
-			tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
-
-//			etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo);
-
-			VIV2D_DBG_MSG("_Viv2OpClearTmpPix %p %d", tmp->bo, v2d->tmp_pix_cnt);
+static inline void _Viv2DOpDelTmpPix(Viv2DPtr v2d, Viv2DPixmapPrivPtr tmp) {
 #ifdef VIV2D_CACHE_BO
-			etna_bo_cache_del(v2d->dev, tmp->bo);
+	 etna_bo_cache_del(v2d->dev, tmp->bo);
 #else
-			etna_bo_del(tmp->bo);
+	etna_bo_del(tmp->bo);
 #endif
-		} while (v2d->tmp_pix_cnt);
-	}
+
+	free(tmp);
 }
 
 static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, int height, int bpp) {
 	Viv2DPixmapPrivPtr tmp;
 	int pitch;
 
-	if (v2d->tmp_pix_cnt == VIV2D_MAX_TMP_PIX) {
-//		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix achieved %d %d", v2d->tmp_pix_cnt, v2d->stream->offset);
-//		_Viv2DStreamCommit(v2d, TRUE);
-		_Viv2OpClearTmpPix(v2d);
-//		VIV2D_INFO_MSG("_Viv2DOpCreateTmpPix max tmp pix commit %d", v2d->tmp_pix_cnt);
-	}
-
-	tmp = &v2d->tmp_pix[v2d->tmp_pix_cnt];
+	tmp = calloc(sizeof(*tmp), 1);
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
 #ifdef VIV2D_CACHE_BO
 	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
@@ -449,7 +432,6 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 	tmp->width = width;
 	tmp->height = height;
 	tmp->pitch = pitch;
-	v2d->tmp_pix_cnt++;
 
 	return tmp;
 }

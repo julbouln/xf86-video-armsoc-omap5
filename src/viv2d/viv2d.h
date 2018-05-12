@@ -144,9 +144,6 @@ typedef struct _Viv2DRec {
 	struct etna_bo *bo;
 	int width;
 	int height;
-
-	Viv2DPixmapPrivRec tmp_pix[VIV2D_MAX_TMP_PIX];
-	int tmp_pix_cnt;
 } Viv2DRec, *Viv2DPtr;
 
 

@@ -8,12 +8,6 @@
 
 #define ETNA_PIPE_BOS_SIZE 1024*4
 
-enum etna_bo_state {
-	ETNA_BO_READY,
-	ETNA_BO_STREAMED,
-	ETNA_BO_FLUSHED
-};
-
 struct etna_bo_cache {
 	struct etna_bo *bo;
 	int size;
@@ -24,6 +18,8 @@ struct etna_device {
 	int fd;
 	struct etna_bo_cache cache[ETNA_BO_CACHE_SIZE];
 	uint32_t cache_size;
+
+	void *cache_hash;
 };
 
 struct etna_bo {

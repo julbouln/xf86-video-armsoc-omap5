@@ -318,6 +318,7 @@ void Viv2DPrepareSoftAlpha(Viv2DRec *v2d) {
 
 void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 	_Viv2DStreamCommit(v2d, TRUE);
+//	_Viv2DStreamWait(v2d);
 	char *tmp_dest_buf = etna_bo_map(v2d->op.tmp_dst->bo);
 	char *dest_buf = etna_bo_map(v2d->op.dst->bo);
 	int w = v2d->op.dst->width;
@@ -326,7 +327,7 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 	int dst_pitch = v2d->op.dst->pitch;
 
 	etna_bo_cpu_prep(v2d->op.tmp_dst->bo, DRM_ETNA_PREP_READ, 5000000000);
-	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_WRITE, 5000000000);
+//	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_WRITE, 5000000000);
 
 	while (h--) {
 		ARGBExtractAlphaRow_NEON(tmp_dest_buf, dest_buf, w);
@@ -334,9 +335,8 @@ void Viv2DDoneSoftAlpha(Viv2DRec *v2d) {
 		dest_buf += dst_pitch;
 	}
 
-	etna_bo_cpu_fini(v2d->op.dst->bo);
+//	etna_bo_cpu_fini(v2d->op.dst->bo);
 	etna_bo_cpu_fini(v2d->op.tmp_dst->bo);
-
 }
 
 void Viv2DFinishSoftAlpha(Viv2DRec *v2d) {
@@ -466,7 +466,8 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 	// only if pixmap has been used
 	if (pix->refcnt > 0) {
 		// flush if remaining state
-		if (pix->bo) {
+		if (pix->bo && pix->bo != ETNA_BO_READY) {
+//			VIV2D_INFO_MSG("Viv2DPrepareAccess %p (%dx%d) %d (%d)", pPixmap, pix->width, pix->height, index, pix->refcnt);
 			_Viv2DStreamCommit(v2d, TRUE);
 			etna_bo_cpu_prep(pix->bo, idx2op(index), 5000000000);
 		}
@@ -783,15 +784,18 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 #endif
 
 #ifdef VIV2D_USERPTR
-//	uintptr_t pitch_start = ((uintptr_t)src / src_pitch) * src_pitch;
-//	uintptr_t page_start = ((uintptr_t)pitch_start / 4096) * 4096;
+
 	uintptr_t page_start = ((uintptr_t)src / (PAGE_SIZE * src_pitch)) * (PAGE_SIZE * src_pitch);
 	char *start_buf = (char *)page_start;
-//	if ((uintptr_t)src == ALIGN((uintptr_t)src, PAGE_SIZE)) {
 
 	src_x = (((uintptr_t)src - page_start) % src_pitch) / 4;
 	src_y = (((uintptr_t)src - page_start) / src_pitch);
 	size_t aligned_size = PAGE_ALIGN(src_pitch * (h + src_y + 1));
+
+	VIV2D_INFO_MSG("Viv2DUploadToScreen page aligned %p/%p %dx%d %x", start_buf, src, src_x, src_y, aligned_size);
+
+//	src_x = 0;
+//	src_y = 0;
 	if (aligned_size < 1024 * 1024 * 16) {
 
 		VIV2D_INFO_MSG("Viv2DUploadToScreen page aligned %p %dx%d", src, src_x, src_y);
@@ -816,9 +820,6 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 		VIV2D_INFO_MSG("Viv2DUploadToScreen cannot create usermem : two large alignement %ld", aligned_size);
 		tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
 	}
-//	} else {
-//		tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
-//	}
 #else
 	tmp = _Viv2DOpCreateTmpPix(v2d, w, h, pDst->drawable.bitsPerPixel);
 #endif
@@ -866,7 +867,11 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 		etna_bo_wait(v2d->dev, v2d->pipe, tmp->bo, 5000000000);
 		etna_bo_del(tmp->bo);
 		free(tmp);
+	} else {
+		_Viv2DOpDelTmpPix(v2d, tmp);
 	}
+#else
+	_Viv2DOpDelTmpPix(v2d, tmp);
 #endif
 
 	return TRUE;
@@ -968,11 +973,11 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 
 	etna_bo_cpu_fini(tmp->bo);
 
-	_Viv2OpClearTmpPix(v2d);
-
 	VIV2D_DBG_MSG("Viv2DDownloadFromScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d", pSrc, etna_bo_map(src->bo), src, pitch, tmp->pitch, x, y, w, h,
 	              pSrc->drawable.width, pSrc->drawable.height,
 	              pSrc->drawable.depth, pSrc->drawable.bitsPerPixel);
+
+	_Viv2DOpDelTmpPix(v2d, tmp);
 
 	return TRUE;
 }
@@ -1140,11 +1145,6 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 	}
 
 	VIV2D_DBG_MSG("Viv2DDoneSolid dst:%p %d", pPixmap, v2d->stream->offset);
-
-	/*
-		_Viv2DStreamCommit(v2d, TRUE);
-		exaMarkSync(pPixmap->drawable.pScreen);
-	*/
 }
 /** @} */
 #else
@@ -1323,9 +1323,6 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 	_Viv2DStreamCopy(v2d, v2d->op.src, v2d->op.dst, v2d->op.blend_op, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height, v2d->op.rects, v2d->op.cur_rect);
 
 	VIV2D_DBG_MSG("Viv2DDoneCopy dst:%p %d", pDstPixmap, v2d->stream->offset);
-
-//	_Viv2DStreamCommit(v2d, TRUE);
-//	exaMarkSync(pDstPixmap->drawable.pScreen);
 }
 /** @} */
 #else
@@ -1856,7 +1853,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			                 cpy_op, 0, 0, width, height, drect, 1);
 
 			VIV2D_DBG_MSG("Viv2DComposite A8/A8R8G8B8 mask composite");
-
+			_Viv2DOpDelTmpPix(v2d, tmp_dest);
 		} else
 #endif
 		{
@@ -1879,7 +1876,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 			                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
 #endif
 		}
-
+		_Viv2DOpDelTmpPix(v2d, tmp);
 	} else {
 		// we need to use intermediary surfaces if dst or src is not A8R8G8B8
 		if (v2d->op.src_fmt.fmt != DE_FORMAT_A8R8G8B8 ||
@@ -1913,6 +1910,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 					_Viv2DStreamComp(v2d, viv2d_src_pix, tmp_dest, &tmp_dest->format, 0, v2d->op.dst,
 					                 cpy_op, 0, 0, width, height, drect, 1);
 
+					_Viv2DOpDelTmpPix(v2d, tmp_dest);
 				} else
 #endif
 				{
@@ -1932,6 +1930,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 					                 v2d->op.blend_op, 0, 0, width, height, drect, 1);
 #endif
 				}
+				_Viv2DOpDelTmpPix(v2d, tmp);
 			} else {
 #ifdef VIV2D_SOFT_A8_DST
 				if (v2d->op.dst->format.fmt == DE_FORMAT_A8) {
@@ -2032,9 +2031,6 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		Viv2DFinishSoftAlpha(v2d);
 	}
 #endif
-
-//	_Viv2DStreamCommit(v2d, TRUE); // why this is needed ?
-//	exaMarkSync(pDst->drawable.pScreen);
 }
 
 #else
@@ -2065,7 +2061,7 @@ CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	etna_set_state(v2d->stream, VIVS_FE_AUTO_FLUSH, 0);
 
 	_Viv2DStreamCommit(v2d, FALSE);
-	_Viv2OpClearTmpPix(v2d);
+//	_Viv2OpClearTmpPix(v2d);
 
 	etna_bo_del(v2d->bo);
 	etna_cmd_stream_del(v2d->stream);
@@ -2395,6 +2391,9 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	              fullDstBox->x1, fullDstBox->y1, fullDstBox->x2, fullDstBox->y2,
 	              tmp->width, tmp->height, tmp->pitch,
 	              v_scale, h_scale);
+
+	_Viv2DOpDelTmpPix(v2d, tmp);
+	_Viv2DOpDelTmpPix(v2d, tmp_dest);
 
 	return TRUE;
 }

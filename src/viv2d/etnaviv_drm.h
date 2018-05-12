@@ -236,6 +236,13 @@ struct drm_etnaviv_gem_wait {
 #define DRM_IOCTL_ETNAVIV_GEM_USERPTR  DRM_IOWR(DRM_COMMAND_BASE + DRM_ETNAVIV_GEM_USERPTR, struct drm_etnaviv_gem_userptr)
 #define DRM_IOCTL_ETNAVIV_GEM_WAIT     DRM_IOW(DRM_COMMAND_BASE + DRM_ETNAVIV_GEM_WAIT, struct drm_etnaviv_gem_wait)
 
+
+enum etna_bo_state {
+	ETNA_BO_READY,
+	ETNA_BO_STREAMED,
+	ETNA_BO_FLUSHED
+};
+
 #if defined(__cplusplus)
 }
 #endif
