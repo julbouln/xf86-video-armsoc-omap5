@@ -35,6 +35,121 @@ simplified etnaviv drm based on libdrm
 
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
 
+// cache
+
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
+	struct etna_bo *bo;
+	int i;
+	bo = NULL;
+	int aligned_size = ALIGN(size, 4096);
+
+	if (dev->cache_reusable_len > 0) {
+		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+			struct etna_bo_cache *bo_cache = &dev->cache[i];
+			// free to use
+			if (!bo_cache->used && aligned_size == bo_cache->size && bo_cache->ready) {
+//				INFO_MSG("etna_bo_cache_new: reuse idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
+				bo_cache->used = 1;
+				bo_cache->ready = 0;
+				bo = bo_cache->bo;
+#ifdef ETNA_BO_CPU_CLEAR
+				// FIXME: the GPU should do that
+				etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE, 5000000000);
+				char *buf = etna_bo_map(bo);
+				neon_memset(buf, 0, size);
+				etna_bo_cpu_fini(bo);
+#endif
+				dev->cache_reusable_len--;
+				return bo;
+			}
+			// empty entry
+			if (bo_cache->size == 0) {
+				bo_cache->used = 1;
+				bo_cache->ready = 0;
+				bo_cache->size = aligned_size;
+				dev->cache_size += bo_cache->size;
+				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
+//				INFO_MSG("etna_bo_cache_new: create idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
+				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
+				dev->cache_reusable_len--;
+				return bo;
+			}
+		}
+	} else {
+		INFO_MSG("etna_bo_cache_new: need recycle %d", dev->cache_size);
+
+		// recycle
+		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+			struct etna_bo_cache *bo_cache = &dev->cache[i];
+			if (!bo_cache->used && bo_cache->bo->state == ETNA_BO_READY) {
+//				INFO_MSG("etna_bo_cache_new: recycle idx:%d cache_size:%d bo:%p size:%d(%d)", i, dev->cache_size, bo_cache->bo, bo_cache->size, size);
+				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache);
+				etna_bo_del(bo_cache->bo);
+				dev->cache_size -= bo_cache->size;
+				bo_cache->used = 1;
+				bo_cache->size = aligned_size;
+				dev->cache_size += bo_cache->size;
+				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
+				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
+				return bo;
+			}
+		}
+	}
+
+	ERROR_MSG("etna_bo_cache_new: cannot create bo %ld", dev->cache_size);
+
+	return bo;
+}
+
+void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
+	struct etna_bo_cache *bo_cache = NULL;
+	drmHashLookup(dev->cache_hash, (uintptr_t)bo, (void **)&bo_cache);
+	if (bo_cache) {
+		bo_cache->used = 0;
+//		INFO_MSG("etna_bo_cache_del: del idx:%d cache_size:%d bo:%p reusable_len:%d", bo_cache->idx, dev->cache_size, bo_cache->bo, dev->cache_reusable_len);
+		dev->cache_reusable_len++;
+
+#ifdef ETNA_BO_GPU_CLEAR
+//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
+		int asize = ALIGN(dev->cache[i].size, 4096) / 4;
+		Viv2DPixmapPrivRec pix;
+		pix.bo = bo;
+		pix.width = 32;
+		pix.height = asize / 32;
+		pix.pitch = 32 * 4;
+		pix.format.bpp = 32;
+		pix.format.depth = 32;
+		pix.format.swizzle = DE_SWIZZLE_ARGB;
+		pix.format.fmt = DE_FORMAT_A8R8G8B8;
+		_Viv2DStreamClear(dev, &pix);
+#endif
+		return;
+	}
+}
+
+void etna_bo_cache_clean(struct etna_device *dev) {
+	for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+		struct etna_bo_cache *bo_cache = &dev->cache[i];
+		if (bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
+			bo_cache->ready = 1;
+		}
+	}
+	if (dev->cache_size > ETNA_BO_CACHE_MAX) {
+		for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+			struct etna_bo_cache *bo_cache = &dev->cache[i];
+			if (!bo_cache->used && bo_cache->ready && bo_cache->bo) {
+//				INFO_MSG("etna_bo_cache_new: clean idx:%d cache_size:%d bo:%p size:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size);
+				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache->bo);
+				etna_bo_del(bo_cache->bo);
+				dev->cache_size -= bo_cache->size;
+				bo_cache->used = 0;
+				bo_cache->size = 0;
+				bo_cache->bo = NULL;
+				dev->cache_reusable_len--;
+			}
+		}
+	}
+}
 
 // device
 
@@ -48,12 +163,15 @@ struct etna_device *etna_device_new(int fd)
 	dev->fd = fd;
 
 	dev->cache_size = 0;
-	for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-		dev->cache[i].bo = NULL;
-		dev->cache[i].size = 0;
-		dev->cache[i].used = 0;
+	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
+		dev->cache[idx].bo = NULL;
+		dev->cache[idx].size = 0;
+		dev->cache[idx].used = 0;
+		dev->cache[idx].ready = 1;
+		dev->cache[idx].idx = idx;
 	}
 	dev->cache_hash = drmHashCreate();
+	dev->cache_reusable_len = ETNA_BO_CACHE_SIZE;
 
 	return dev;
 }
@@ -229,6 +347,8 @@ int etna_pipe_wait_ns(struct etna_pipe *pipe, uint32_t timestamp, uint64_t ns)
 		pipe->bos[i]->state = ETNA_BO_READY;
 	}
 	pipe->nr_bos = 0;
+
+	etna_bo_cache_clean(dev);
 
 	return 0;
 }
@@ -495,101 +615,6 @@ void etna_cmd_stream_reloc(struct etna_cmd_stream *stream, const struct etna_rel
 	reloc->flags = 0;
 
 	etna_cmd_stream_emit(stream, addr);
-}
-
-// cache
-
-struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
-	struct etna_bo *bo;
-	int i;
-	bo = NULL;
-
-	for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-		// free to use
-		if (!dev->cache[i].used && ALIGN(size, 4096) == dev->cache[i].size && dev->cache[i].bo->state == ETNA_BO_READY) {
-//			INFO_MSG("etna_bo_cache_new: reuse %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, size);
-			dev->cache[i].used = 1;
-			bo = dev->cache[i].bo;
-#ifdef ETNA_BO_CPU_CLEAR
-			// FIXME: the GPU should do that
-			etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE, 5000000000);
-			char *buf = etna_bo_map(bo);
-			neon_memset(buf, 0, size);
-			etna_bo_cpu_fini(bo);
-#endif
-			return bo;
-		}
-		// empty entry
-		if (dev->cache[i].size == 0) {
-			dev->cache[i].used = 1;
-			dev->cache[i].size = ALIGN(size, 4096);
-			dev->cache_size += dev->cache[i].size;
-			bo = dev->cache[i].bo = etna_bo_new(dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
-//			INFO_MSG("etna_bo_cache_new: create %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, size);
-			drmHashInsert(dev->cache_hash, (uintptr_t)bo, &dev->cache[i]);
-			return bo;
-		}
-	}
-
-	// recycle
-	if (!bo) {
-		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-			if (!dev->cache[i].used && dev->cache[i].bo->state == ETNA_BO_READY) {
-//				INFO_MSG("etna_bo_cache_new: recycle %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, ALIGN(size, 4096));
-				drmHashDelete(dev->cache_hash, (uintptr_t)dev->cache[i].bo);
-				etna_bo_del(dev->cache[i].bo);
-				dev->cache_size -= dev->cache[i].size;
-				dev->cache[i].used = 1;
-				dev->cache[i].size = ALIGN(size, 4096);
-				dev->cache_size += dev->cache[i].size;
-				bo = dev->cache[i].bo = etna_bo_new(dev, ALIGN(size, 4096), ETNA_BO_UNCACHED);
-				drmHashInsert(dev->cache_hash, (uintptr_t)bo, &dev->cache[i]);
-				return bo;
-			}
-		}
-	}
-
-	if (dev->cache_size > ETNA_BO_CACHE_MAX) {
-		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-			if (!dev->cache[i].used && dev->cache[i].bo->state == ETNA_BO_READY) {
-//				INFO_MSG("etna_bo_cache_new: clean %d %ld %p %d->%d", i, dev->cache_size, dev->cache[i].bo, dev->cache[i].size, ALIGN(size, 4096));
-				drmHashDelete(dev->cache_hash, (uintptr_t)dev->cache[i].bo);
-				etna_bo_del(dev->cache[i].bo);
-				dev->cache_size -= dev->cache[i].size;
-				dev->cache[i].size = 0;
-				dev->cache[i].bo = NULL;
-			}
-		}
-	}
-
-	ERROR_MSG("etna_bo_cache_new: cannot create bo %ld", dev->cache_size);
-
-	return bo;
-}
-
-void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
-	struct etna_bo_cache *cache_bo = NULL;
-	drmHashLookup(dev->cache_hash, (uintptr_t)bo, (void **)&cache_bo);
-	if (cache_bo) {
-		cache_bo->used = 0;
-//			INFO_MSG("etna_bo_cache_del: del %d %ld %p", i, dev->cache_size, dev->cache[i].bo);
-
-#ifdef ETNA_BO_GPU_CLEAR
-//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
-		int asize = ALIGN(dev->cache[i].size, 4096) / 4;
-		Viv2DPixmapPrivRec pix;
-		pix.bo = bo;
-		pix.width = 32;
-		pix.height = asize / 32;
-		pix.pitch = 32 * 4;
-		pix.format.bpp = 32;
-		pix.format.depth = 32;
-		pix.format.swizzle = DE_SWIZZLE_ARGB;
-		pix.format.fmt = DE_FORMAT_A8R8G8B8;
-		_Viv2DStreamClear(dev, &pix);
-#endif
-		return;
-	}
 }
 
 // bo
