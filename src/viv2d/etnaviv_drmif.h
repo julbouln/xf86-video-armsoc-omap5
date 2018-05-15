@@ -186,7 +186,7 @@ struct etna_reloc {
 void etna_cmd_stream_reloc(struct etna_cmd_stream *stream, const struct etna_reloc *r);
 
 // cache
-struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size);
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size);
 void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo);
 
 // extra

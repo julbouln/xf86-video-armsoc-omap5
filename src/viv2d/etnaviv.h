@@ -3,27 +3,34 @@
 #include "etnaviv_drmif.h"
 #include "etnaviv_drm.h"
 
+#include "queue.h"
+
 #define ETNA_BO_CACHE_SIZE 1024*4
 #define ETNA_BO_CACHE_MAX 1024*1024*64
 
 #define ETNA_PIPE_BOS_SIZE 1024*4
 
-struct etna_bo_cache {
-	struct etna_bo *bo;
-	int size;
-	int used;
-	int ready;
+#define ETNA_BO_CACHE_PROFILE 1
+//#define ETNA_BO_CACHE_DEBUG 1
+#define ETNA_BO_CACHE_PAGE_SIZE 4096
+#define ETNA_BO_CACHE_BUCKETS_COUNT 4096
+#define ETNA_BO_CACHE_BUCKET_SIZE(size) ((size) >> 12)
+
+struct etna_bo_cache_bucket {
 	uint32_t idx;
+	int dirty;
+	queue_t *unused_bos;
+	queue_t *free_bos;
+};
+
+struct etna_bo_cache {
+	struct etna_bo_cache_bucket buckets[ETNA_BO_CACHE_BUCKETS_COUNT];
+	size_t size;
 };
 
 struct etna_device {
 	int fd;
-	struct etna_bo_cache cache[ETNA_BO_CACHE_SIZE];
-	uint32_t cache_size;
-
-	uint32_t cache_reusable_len;
-
-	void *cache_hash;
+	struct etna_bo_cache *cache;
 };
 
 struct etna_bo {

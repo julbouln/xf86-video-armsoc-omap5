@@ -37,20 +37,233 @@ simplified etnaviv drm based on libdrm
 
 // cache
 
+#ifdef ETNA_BO_CACHE_PROFILE
+static uint64_t prof_bucket;
+static uint64_t prof_alloc;
+static uint64_t prof_new;
+static uint64_t prof_recycle;
+static uint64_t prof_reuse;
+#endif
+
+void etna_bo_cache_init(struct etna_device *dev) {
+#ifdef ETNA_BO_CACHE_PROFILE
+	prof_bucket = 0;
+	prof_alloc = 0;
+	prof_new = 0;
+	prof_recycle = 0;
+	prof_reuse = 0;
+#endif
+
+	dev->cache = calloc(sizeof(struct etna_bo_cache), 1);
+	dev->cache->size = 0;
+	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
+		dev->cache->buckets[i].dirty = 0;
+		dev->cache->buckets[i].unused_bos = queue_new();
+		dev->cache->buckets[i].free_bos = queue_new();
+	}
+}
+
+void etna_bo_cache_destroy(struct etna_device *dev) {
+	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
+		queue_free(dev->cache->buckets[i].unused_bos);
+		queue_free(dev->cache->buckets[i].free_bos);
+	}
+}
+
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
+	struct etna_bo_cache *cache = dev->cache;
+	size_t aligned_size = ALIGN(size, ETNA_BO_CACHE_PAGE_SIZE);
+
+	uint16_t bucket_size = ETNA_BO_CACHE_BUCKET_SIZE(aligned_size);
+	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
+
+#ifdef ETNA_BO_CACHE_PROFILE
+	prof_alloc++;
+#endif
+
+	if (!queue_is_empty(bucket->free_bos)) {
+		struct etna_bo *bo = queue_pop_head(bucket->free_bos);
+
+#ifdef ETNA_BO_CACHE_DEBUG
+		INFO_MSG("etna_cache_bo_new: reuse bo:%p size:%d", bo, size);
+#endif
+#ifdef ETNA_BO_CACHE_PROFILE
+		prof_reuse++;
+#endif
+		return bo;
+	} else {
+		struct etna_bo *bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
+#ifdef ETNA_BO_CACHE_DEBUG
+		INFO_MSG("etna_cache_bo_new: new bo:%p size:%d", bo, size);
+#endif
+#ifdef ETNA_BO_CACHE_PROFILE
+		prof_new++;
+#endif
+		cache->size += aligned_size;
+		return bo;
+	}
+	return NULL;
+};
+
+void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
+	struct etna_bo_cache *cache = dev->cache;
+	size_t aligned_bo_size = ALIGN(bo->size, ETNA_BO_CACHE_PAGE_SIZE);
+	uint16_t bucket_size = ETNA_BO_CACHE_BUCKET_SIZE(aligned_bo_size);
+	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
+	queue_push_tail(bucket->unused_bos, bo);
+	bucket->dirty = 1;
+}
+
+void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
+	uint32_t qsize = queue_size(bucket->unused_bos);
+	for (int i = 0; i < qsize; ++i) {
+		struct etna_bo *unused_bo = queue_peek_head(bucket->unused_bos);
+		if (unused_bo->state == ETNA_BO_READY) { // bos are really free when they are ready
+			unused_bo = queue_pop_head(bucket->unused_bos);
+			queue_push_tail(bucket->free_bos, unused_bo);
+		} else {
+			// bucket is still dirty
+			bucket->dirty = 1;
+		}
+	}
+}
+
+void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_bucket *bucket) {
+	struct etna_bo_cache *cache = dev->cache;
+	while (!queue_is_empty(bucket->free_bos)) {
+		struct etna_bo *free_bo = queue_pop_head(bucket->free_bos);
+#ifdef ETNA_BO_CACHE_PROFILE
+		prof_recycle++;
+#endif
+		cache->size -= ALIGN(free_bo->size, ETNA_BO_CACHE_PAGE_SIZE);
+#ifdef ETNA_BO_CACHE_DEBUG
+		INFO_MSG("etna_cache_bo_del: del bo:%p size:%d", free_bo, free_bo->size);
+#endif
+		etna_bo_del(free_bo);
+	}
+}
+
+void etna_bo_cache_clean(struct etna_device *dev) {
+	struct etna_bo_cache *cache = dev->cache;
+	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
+		struct etna_bo_cache_bucket *bucket = &cache->buckets[i];
+		// clean only dirty buckets
+		if (bucket->dirty) {
+			bucket->dirty = 0;
+			etna_bo_cache_clean_bucket(bucket);
+		}
+	}
+
+	if (cache->size > ETNA_BO_CACHE_MAX) {
+		INFO_MSG("etna_bo_cache_clean: recycle %d", cache->size);
+		// clean largest buckets first
+		for (int i = ETNA_BO_CACHE_BUCKETS_COUNT - 1; i >= 0; --i) {
+			if (cache->size > ETNA_BO_CACHE_MAX / 2) {
+				etna_bo_cache_recycle_bucket(dev, &cache->buckets[i]);
+			} else {
+//				printf("DONE WITH RECYCLE %d\n",i);
+				break;
+			}
+		}
+	}
+}
+
+
+#if 0
+
+static void add_bucket(struct etna_device *dev, int size)
+{
+	unsigned i = dev->num_buckets;
+
+	assert(i < ARRAY_SIZE(dev->cache_bucket));
+
+//	list_inithead(&dev->cache_bucket[i].list);
+	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
+		dev->cache_bucket[i].cache[idx].bo = NULL;
+		dev->cache_bucket[i].cache[idx].size = 0;
+		dev->cache_bucket[i].cache[idx].used = 0;
+//		dev->cache_bucket[i].cache[idx].ready = 1;
+		dev->cache_bucket[i].cache[idx].idx = idx;
+	}
+	dev->cache_bucket[i].size = size;
+	dev->num_buckets++;
+}
+
+static struct etna_bo_bucket *get_bucket(struct etna_device *dev, uint32_t size)
+{
+	unsigned i;
+
+	/* hmm, this is what intel does, but I suppose we could calculate our
+	 * way to the correct bucket size rather than looping..
+	 */
+	for (i = 0; i < dev->num_buckets; i++) {
+		struct etna_bo_bucket *bucket = &dev->cache_bucket[i];
+		if (bucket->size >= size) {
+			return bucket;
+		}
+	}
+
+	return NULL;
+}
+
+static void etna_bo_cache_init(struct etna_device *dev)
+{
+	unsigned long size, cache_max_size = 64 * 1024 * 1024;
+
+	dev->cache_size = 0;
+	/*	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
+			dev->cache[idx].bo = NULL;
+			dev->cache[idx].size = 0;
+			dev->cache[idx].used = 0;
+			dev->cache[idx].ready = 1;
+			dev->cache[idx].idx = idx;
+		}
+		*/
+	dev->cache_hash = drmHashCreate();
+	dev->cache_reusable_len = ETNA_BO_CACHE_SIZE;
+
+	/* OK, so power of two buckets was too wasteful of memory.
+	 * Give 3 other sizes between each power of two, to hopefully
+	 * cover things accurately enough.  (The alternative is
+	 * probably to just go for exact matching of sizes, and assume
+	 * that for things like composited window resize the tiled
+	 * width/height alignment and rounding of sizes to pages will
+	 * get us useful cache hit rates anyway)
+	 */
+	add_bucket(dev, 4096);
+	add_bucket(dev, 4096 * 2);
+	add_bucket(dev, 4096 * 3);
+
+	/* Initialize the linked lists for BO reuse cache. */
+	for (size = 4 * 4096; size <= cache_max_size; size *= 2) {
+		add_bucket(dev, size);
+		add_bucket(dev, size + size * 1 / 4);
+		add_bucket(dev, size + size * 2 / 4);
+		add_bucket(dev, size + size * 3 / 4);
+	}
+
+	INFO_MSG("cache total buckets %d", dev->num_buckets);
+}
+
+
 struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
 	struct etna_bo *bo;
 	int i;
 	bo = NULL;
 	int aligned_size = ALIGN(size, 4096);
 
+	struct etna_bo_bucket *bucket = get_bucket(dev, aligned_size);
+
 	if (dev->cache_reusable_len > 0) {
 		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-			struct etna_bo_cache *bo_cache = &dev->cache[i];
+//			struct etna_bo_cache *bo_cache = &dev->cache[i];
+			struct etna_bo_cache *bo_cache = &bucket->cache[i];
 			// free to use
-			if (!bo_cache->used && aligned_size == bo_cache->size && bo_cache->ready) {
+			if (!bo_cache->used && aligned_size == bo_cache->size && bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
 //				INFO_MSG("etna_bo_cache_new: reuse idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
 				bo_cache->used = 1;
-				bo_cache->ready = 0;
+//				bo_cache->ready = 0;
+				bo_cache->size = aligned_size;
 				bo = bo_cache->bo;
 #ifdef ETNA_BO_CPU_CLEAR
 				// FIXME: the GPU should do that
@@ -65,12 +278,13 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
 			// empty entry
 			if (bo_cache->size == 0) {
 				bo_cache->used = 1;
-				bo_cache->ready = 0;
+//				bo_cache->ready = 0;
 				bo_cache->size = aligned_size;
 				dev->cache_size += bo_cache->size;
 				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
+				bo->bo_cache = bo_cache;
 //				INFO_MSG("etna_bo_cache_new: create idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
-				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
+//				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
 				dev->cache_reusable_len--;
 				return bo;
 			}
@@ -80,17 +294,19 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
 
 		// recycle
 		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-			struct etna_bo_cache *bo_cache = &dev->cache[i];
+//			struct etna_bo_cache *bo_cache = &dev->cache[i];
+			struct etna_bo_cache *bo_cache = &bucket->cache[i];
 			if (!bo_cache->used && bo_cache->bo->state == ETNA_BO_READY) {
 //				INFO_MSG("etna_bo_cache_new: recycle idx:%d cache_size:%d bo:%p size:%d(%d)", i, dev->cache_size, bo_cache->bo, bo_cache->size, size);
-				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache);
+//				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache);
 				etna_bo_del(bo_cache->bo);
 				dev->cache_size -= bo_cache->size;
 				bo_cache->used = 1;
 				bo_cache->size = aligned_size;
 				dev->cache_size += bo_cache->size;
 				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
-				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
+				bo->bo_cache = bo_cache;
+//				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
 				return bo;
 			}
 		}
@@ -102,8 +318,9 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
 }
 
 void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
-	struct etna_bo_cache *bo_cache = NULL;
-	drmHashLookup(dev->cache_hash, (uintptr_t)bo, (void **)&bo_cache);
+//	struct etna_bo_cache *bo_cache = NULL;
+//	drmHashLookup(dev->cache_hash, (uintptr_t)bo, (void **)&bo_cache);
+	struct etna_bo_cache *bo_cache = bo->bo_cache;
 	if (bo_cache) {
 		bo_cache->used = 0;
 //		INFO_MSG("etna_bo_cache_del: del idx:%d cache_size:%d bo:%p reusable_len:%d", bo_cache->idx, dev->cache_size, bo_cache->bo, dev->cache_reusable_len);
@@ -128,29 +345,37 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 }
 
 void etna_bo_cache_clean(struct etna_device *dev) {
-	for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-		struct etna_bo_cache *bo_cache = &dev->cache[i];
-		if (bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
-			bo_cache->ready = 1;
-		}
-	}
-	if (dev->cache_size > ETNA_BO_CACHE_MAX) {
-		for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-			struct etna_bo_cache *bo_cache = &dev->cache[i];
-			if (!bo_cache->used && bo_cache->ready && bo_cache->bo) {
-//				INFO_MSG("etna_bo_cache_new: clean idx:%d cache_size:%d bo:%p size:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size);
-				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache->bo);
-				etna_bo_del(bo_cache->bo);
-				dev->cache_size -= bo_cache->size;
-				bo_cache->used = 0;
-				bo_cache->size = 0;
-				bo_cache->bo = NULL;
-				dev->cache_reusable_len--;
+	for (int b = 0; b < 56; b++) {
+		struct etna_bo_bucket *bucket = &dev->cache_bucket[b];
+		/*
+				for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+		//		struct etna_bo_cache *bo_cache = &dev->cache[i];
+					struct etna_bo_cache *bo_cache = &bucket->cache[i];
+					if (bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
+						bo_cache->ready = 1;
+					}
+				}
+				*/
+		if (dev->cache_size > ETNA_BO_CACHE_MAX) {
+			for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
+//			struct etna_bo_cache *bo_cache = &dev->cache[i];
+				struct etna_bo_cache *bo_cache = &bucket->cache[i];
+				if (!bo_cache->used && bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
+					INFO_MSG("etna_bo_cache_new: clean idx:%d cache_size:%d bo:%p size:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size);
+//				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache->bo);
+					etna_bo_del(bo_cache->bo);
+					dev->cache_size -= bo_cache->size;
+					bo_cache->used = 0;
+					bo_cache->size = 0;
+					bo_cache->bo = NULL;
+					dev->cache_reusable_len--;
+				}
 			}
 		}
 	}
-}
 
+}
+#endif
 // device
 
 struct etna_device *etna_device_new(int fd)
@@ -162,23 +387,14 @@ struct etna_device *etna_device_new(int fd)
 
 	dev->fd = fd;
 
-	dev->cache_size = 0;
-	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
-		dev->cache[idx].bo = NULL;
-		dev->cache[idx].size = 0;
-		dev->cache[idx].used = 0;
-		dev->cache[idx].ready = 1;
-		dev->cache[idx].idx = idx;
-	}
-	dev->cache_hash = drmHashCreate();
-	dev->cache_reusable_len = ETNA_BO_CACHE_SIZE;
+	etna_bo_cache_init(dev);
 
 	return dev;
 }
 
 void etna_device_del(struct etna_device *dev)
 {
-	drmHashDestroy(dev->cache_hash);
+	etna_bo_cache_destroy(dev);
 	free(dev);
 }
 
@@ -811,30 +1027,19 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 		.flags = flags,
 		.handle = 0
 	};
-	int err;
 
-	err = drmCommandWriteRead(dev->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
-	                          sizeof(req));
+	int err = drmCommandWriteRead(dev->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
+	                              sizeof(req));
 	if (err) {
 //		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
 		return NULL;
 	}
 	else {
 		struct etna_bo *usr_bo = NULL;
-		/*
-				struct drm_prime_handle args;
-				args.handle = req.handle;
-				args.flags = DRM_CLOEXEC | DRM_RDWR;
-
-				err = drmIoctl(dev->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
-				mem = etna_bo_from_dmabuf(dev, args.fd);
-				close(args.fd);
-		*/
-
 		usr_bo = bo_from_handle(dev, size, req.handle, 0);
+		usr_bo->map = memory;
 
 //		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, mem, req.handle, size);
-//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d -> %d %d -> %d %d", memory, mem, req.handle, mem->handle, size, mem->size, mem->offset);
 		return usr_bo;
 	}
 }
