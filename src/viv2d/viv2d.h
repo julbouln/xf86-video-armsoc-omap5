@@ -64,7 +64,7 @@ typedef struct _Viv2DFormat {
 	int depth;
 	unsigned int fmt;
 	int swizzle;
-	int alphaBits;
+	int alpha_bits;
 } Viv2DFormat;
 
 typedef struct _Viv2DBoCacheEntry {
@@ -87,8 +87,8 @@ typedef struct {
 
 typedef struct _Viv2DBlendOp {
 	int op;
-	int srcBlendMode;
-	int dstBlendMode;
+	int src_blend_mode;
+	int dst_blend_mode;
 } Viv2DBlendOp;
 
 enum viv2d_src_type {
@@ -109,6 +109,7 @@ typedef struct _Viv2DOp {
 	uint8_t msk_alpha;
 	uint8_t src_alpha;
 	uint8_t dst_alpha;
+
 	Bool msk_alpha_mode_global;
 	Bool src_alpha_mode_global;
 	Bool dst_alpha_mode_global;

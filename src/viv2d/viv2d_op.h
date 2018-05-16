@@ -231,17 +231,29 @@ static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rec
 	VIV2D_DBG_MSG("_Viv2DStreamRects %d", cur_rect);
 }
 
-static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uint8_t src_alpha, uint8_t dst_alpha, Bool src_global, Bool dst_global) {
+static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op,
+                                       uint8_t src_alpha, uint8_t dst_alpha, Bool src_global, Bool dst_global) {
 	if (blend_op) {
 		uint32_t alpha_mode = VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_NORMAL |
 		                      VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_NORMAL;
 
-		if (src_global)
+		uint32_t src_alpha_color = src_alpha;
+		uint32_t dst_alpha_color = dst_alpha;
+
+		uint32_t premultiply = VIVS_DE_COLOR_MULTIPLY_MODES_SRC_PREMULTIPLY_DISABLE |
+		                       VIVS_DE_COLOR_MULTIPLY_MODES_DST_PREMULTIPLY_DISABLE |
+		                       VIVS_DE_COLOR_MULTIPLY_MODES_SRC_GLOBAL_PREMULTIPLY_DISABLE |
+		                       VIVS_DE_COLOR_MULTIPLY_MODES_DST_DEMULTIPLY_DISABLE;
+
+		if (src_global) {
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_GLOBAL;
 //			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_SRC_ALPHA_MODE_SCALED;
-		if (dst_global)
+
+		}
+		if (dst_global) {
 			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_GLOBAL;
 //			alpha_mode |= VIVS_DE_ALPHA_MODES_GLOBAL_DST_ALPHA_MODE_SCALED;
+		}
 
 //		_Viv2DStreamReserve(v2d->stream, 10);
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_CONTROL,
@@ -251,17 +263,14 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op, uin
 
 		etna_set_state(v2d->stream, VIVS_DE_ALPHA_MODES,
 		               alpha_mode |
-		               VIVS_DE_ALPHA_MODES_SRC_BLENDING_MODE(blend_op->srcBlendMode) |
-		               VIVS_DE_ALPHA_MODES_DST_BLENDING_MODE(blend_op->dstBlendMode));
+		               VIVS_DE_ALPHA_MODES_SRC_BLENDING_MODE(blend_op->src_blend_mode) |
+		               VIVS_DE_ALPHA_MODES_DST_BLENDING_MODE(blend_op->dst_blend_mode));
 
-		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, src_alpha << 24);
-		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, dst_alpha << 24);
+		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, src_alpha_color << 24);
+		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, dst_alpha_color << 24);
 
 		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, /* PE20 */
-		               VIVS_DE_COLOR_MULTIPLY_MODES_SRC_PREMULTIPLY_DISABLE |
-		               VIVS_DE_COLOR_MULTIPLY_MODES_DST_PREMULTIPLY_DISABLE |
-		               VIVS_DE_COLOR_MULTIPLY_MODES_SRC_GLOBAL_PREMULTIPLY_DISABLE |
-		               VIVS_DE_COLOR_MULTIPLY_MODES_DST_DEMULTIPLY_DISABLE);
+		               premultiply);
 
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
 
@@ -350,27 +359,13 @@ static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DP
 	_Viv2DStreamFlush(v2d);
 }
 
-static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
-                                    Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
-                                    int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
-	Bool blend = blend_op != NULL ? TRUE : FALSE;
-	Bool src_global = FALSE;
-	Bool dst_global = FALSE;
-	Bool src_alpha = 0;
-	Bool dst_alpha = 0;
-	/*
-		if(dst->format.fmt == DE_FORMAT_X8R8G8B8) {
-			dst_global=TRUE;
-			dst_alpha=0xff;
-			dst->format.fmt = DE_FORMAT_A8R8G8B8;
-		}
+static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
+        Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
+        Bool src_global, uint8_t src_alpha,
+        Bool dst_global, uint8_t dst_alpha,
+        int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
 
-		if(src_fmt->fmt == DE_FORMAT_X8R8G8B8) {
-			src_global=TRUE;
-			src_alpha=0xff;
-			src_fmt->fmt = DE_FORMAT_A8R8G8B8;
-		}
-		*/
+	Bool blend = blend_op != NULL ? TRUE : FALSE;
 	_Viv2DStreamReserveComp(v2d, src_type, cur_rect, blend);
 
 	switch (src_type) {
@@ -394,6 +389,13 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 	_Viv2DStreamFlush(v2d);
 }
 
+static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
+                                    Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
+                                    int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
+
+	_Viv2DStreamCompAlpha(v2d, src_type, src, src_fmt, color, dst, blend_op, FALSE, 0, FALSE, 0, x, y, w, h, rects, cur_rect);
+}
+
 static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 	if (pix && pix->bo) {
 		Viv2DRect rect[1];
@@ -407,12 +409,7 @@ static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 }
 
 static inline void _Viv2DOpDelTmpPix(Viv2DPtr v2d, Viv2DPixmapPrivPtr tmp) {
-#ifdef VIV2D_CACHE_BO
-	 etna_bo_cache_del(v2d->dev, tmp->bo);
-#else
-	etna_bo_del(tmp->bo);
-#endif
-
+	etna_bo_cache_del(v2d->dev, tmp->bo);
 	free(tmp);
 }
 
@@ -422,11 +419,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 
 	tmp = calloc(sizeof(*tmp), 1);
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
-#ifdef VIV2D_CACHE_BO
 	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
-#else
-	tmp->bo = etna_bo_new(v2d->dev, pitch * height, ETNA_BO_UNCACHED);
-#endif
 
 	VIV2D_DBG_MSG("_Viv2DOpCreateTmpPix %p %dx%d %d", tmp->bo, width, height, pitch * height);
 	tmp->width = width;

@@ -154,228 +154,19 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 		}
 	}
 
-	if (cache->size > ETNA_BO_CACHE_MAX) {
+	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
 		INFO_MSG("etna_bo_cache_clean: recycle %d", cache->size);
 		// clean largest buckets first
 		for (int i = ETNA_BO_CACHE_BUCKETS_COUNT - 1; i >= 0; --i) {
-			if (cache->size > ETNA_BO_CACHE_MAX / 2) {
+			if (cache->size > ETNA_BO_CACHE_MAX_SIZE / 2) {
 				etna_bo_cache_recycle_bucket(dev, &cache->buckets[i]);
 			} else {
-//				printf("DONE WITH RECYCLE %d\n",i);
 				break;
 			}
 		}
 	}
 }
 
-
-#if 0
-
-static void add_bucket(struct etna_device *dev, int size)
-{
-	unsigned i = dev->num_buckets;
-
-	assert(i < ARRAY_SIZE(dev->cache_bucket));
-
-//	list_inithead(&dev->cache_bucket[i].list);
-	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
-		dev->cache_bucket[i].cache[idx].bo = NULL;
-		dev->cache_bucket[i].cache[idx].size = 0;
-		dev->cache_bucket[i].cache[idx].used = 0;
-//		dev->cache_bucket[i].cache[idx].ready = 1;
-		dev->cache_bucket[i].cache[idx].idx = idx;
-	}
-	dev->cache_bucket[i].size = size;
-	dev->num_buckets++;
-}
-
-static struct etna_bo_bucket *get_bucket(struct etna_device *dev, uint32_t size)
-{
-	unsigned i;
-
-	/* hmm, this is what intel does, but I suppose we could calculate our
-	 * way to the correct bucket size rather than looping..
-	 */
-	for (i = 0; i < dev->num_buckets; i++) {
-		struct etna_bo_bucket *bucket = &dev->cache_bucket[i];
-		if (bucket->size >= size) {
-			return bucket;
-		}
-	}
-
-	return NULL;
-}
-
-static void etna_bo_cache_init(struct etna_device *dev)
-{
-	unsigned long size, cache_max_size = 64 * 1024 * 1024;
-
-	dev->cache_size = 0;
-	/*	for (int idx = 0; idx < ETNA_BO_CACHE_SIZE; idx++) {
-			dev->cache[idx].bo = NULL;
-			dev->cache[idx].size = 0;
-			dev->cache[idx].used = 0;
-			dev->cache[idx].ready = 1;
-			dev->cache[idx].idx = idx;
-		}
-		*/
-	dev->cache_hash = drmHashCreate();
-	dev->cache_reusable_len = ETNA_BO_CACHE_SIZE;
-
-	/* OK, so power of two buckets was too wasteful of memory.
-	 * Give 3 other sizes between each power of two, to hopefully
-	 * cover things accurately enough.  (The alternative is
-	 * probably to just go for exact matching of sizes, and assume
-	 * that for things like composited window resize the tiled
-	 * width/height alignment and rounding of sizes to pages will
-	 * get us useful cache hit rates anyway)
-	 */
-	add_bucket(dev, 4096);
-	add_bucket(dev, 4096 * 2);
-	add_bucket(dev, 4096 * 3);
-
-	/* Initialize the linked lists for BO reuse cache. */
-	for (size = 4 * 4096; size <= cache_max_size; size *= 2) {
-		add_bucket(dev, size);
-		add_bucket(dev, size + size * 1 / 4);
-		add_bucket(dev, size + size * 2 / 4);
-		add_bucket(dev, size + size * 3 / 4);
-	}
-
-	INFO_MSG("cache total buckets %d", dev->num_buckets);
-}
-
-
-struct etna_bo *etna_bo_cache_new(struct etna_device *dev, int size) {
-	struct etna_bo *bo;
-	int i;
-	bo = NULL;
-	int aligned_size = ALIGN(size, 4096);
-
-	struct etna_bo_bucket *bucket = get_bucket(dev, aligned_size);
-
-	if (dev->cache_reusable_len > 0) {
-		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-//			struct etna_bo_cache *bo_cache = &dev->cache[i];
-			struct etna_bo_cache *bo_cache = &bucket->cache[i];
-			// free to use
-			if (!bo_cache->used && aligned_size == bo_cache->size && bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
-//				INFO_MSG("etna_bo_cache_new: reuse idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
-				bo_cache->used = 1;
-//				bo_cache->ready = 0;
-				bo_cache->size = aligned_size;
-				bo = bo_cache->bo;
-#ifdef ETNA_BO_CPU_CLEAR
-				// FIXME: the GPU should do that
-				etna_bo_cpu_prep(bo, DRM_ETNA_PREP_WRITE, 5000000000);
-				char *buf = etna_bo_map(bo);
-				neon_memset(buf, 0, size);
-				etna_bo_cpu_fini(bo);
-#endif
-				dev->cache_reusable_len--;
-				return bo;
-			}
-			// empty entry
-			if (bo_cache->size == 0) {
-				bo_cache->used = 1;
-//				bo_cache->ready = 0;
-				bo_cache->size = aligned_size;
-				dev->cache_size += bo_cache->size;
-				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
-				bo->bo_cache = bo_cache;
-//				INFO_MSG("etna_bo_cache_new: create idx:%d cache_size:%d bo:%p size:%d(%d) reusable_len:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size, size, dev->cache_reusable_len);
-//				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
-				dev->cache_reusable_len--;
-				return bo;
-			}
-		}
-	} else {
-		INFO_MSG("etna_bo_cache_new: need recycle %d", dev->cache_size);
-
-		// recycle
-		for (i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-//			struct etna_bo_cache *bo_cache = &dev->cache[i];
-			struct etna_bo_cache *bo_cache = &bucket->cache[i];
-			if (!bo_cache->used && bo_cache->bo->state == ETNA_BO_READY) {
-//				INFO_MSG("etna_bo_cache_new: recycle idx:%d cache_size:%d bo:%p size:%d(%d)", i, dev->cache_size, bo_cache->bo, bo_cache->size, size);
-//				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache);
-				etna_bo_del(bo_cache->bo);
-				dev->cache_size -= bo_cache->size;
-				bo_cache->used = 1;
-				bo_cache->size = aligned_size;
-				dev->cache_size += bo_cache->size;
-				bo = bo_cache->bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
-				bo->bo_cache = bo_cache;
-//				drmHashInsert(dev->cache_hash, (uintptr_t)bo, bo_cache);
-				return bo;
-			}
-		}
-	}
-
-	ERROR_MSG("etna_bo_cache_new: cannot create bo %ld", dev->cache_size);
-
-	return bo;
-}
-
-void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
-//	struct etna_bo_cache *bo_cache = NULL;
-//	drmHashLookup(dev->cache_hash, (uintptr_t)bo, (void **)&bo_cache);
-	struct etna_bo_cache *bo_cache = bo->bo_cache;
-	if (bo_cache) {
-		bo_cache->used = 0;
-//		INFO_MSG("etna_bo_cache_del: del idx:%d cache_size:%d bo:%p reusable_len:%d", bo_cache->idx, dev->cache_size, bo_cache->bo, dev->cache_reusable_len);
-		dev->cache_reusable_len++;
-
-#ifdef ETNA_BO_GPU_CLEAR
-//			etna_bo_wait(v2d->dev, v2d->pipe, bo);
-		int asize = ALIGN(dev->cache[i].size, 4096) / 4;
-		Viv2DPixmapPrivRec pix;
-		pix.bo = bo;
-		pix.width = 32;
-		pix.height = asize / 32;
-		pix.pitch = 32 * 4;
-		pix.format.bpp = 32;
-		pix.format.depth = 32;
-		pix.format.swizzle = DE_SWIZZLE_ARGB;
-		pix.format.fmt = DE_FORMAT_A8R8G8B8;
-		_Viv2DStreamClear(dev, &pix);
-#endif
-		return;
-	}
-}
-
-void etna_bo_cache_clean(struct etna_device *dev) {
-	for (int b = 0; b < 56; b++) {
-		struct etna_bo_bucket *bucket = &dev->cache_bucket[b];
-		/*
-				for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-		//		struct etna_bo_cache *bo_cache = &dev->cache[i];
-					struct etna_bo_cache *bo_cache = &bucket->cache[i];
-					if (bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
-						bo_cache->ready = 1;
-					}
-				}
-				*/
-		if (dev->cache_size > ETNA_BO_CACHE_MAX) {
-			for (int i = 0; i < ETNA_BO_CACHE_SIZE; i++) {
-//			struct etna_bo_cache *bo_cache = &dev->cache[i];
-				struct etna_bo_cache *bo_cache = &bucket->cache[i];
-				if (!bo_cache->used && bo_cache->bo && bo_cache->bo->state == ETNA_BO_READY) {
-					INFO_MSG("etna_bo_cache_new: clean idx:%d cache_size:%d bo:%p size:%d", i, dev->cache_size, bo_cache->bo, bo_cache->size);
-//				drmHashDelete(dev->cache_hash, (uintptr_t)bo_cache->bo);
-					etna_bo_del(bo_cache->bo);
-					dev->cache_size -= bo_cache->size;
-					bo_cache->used = 0;
-					bo_cache->size = 0;
-					bo_cache->bo = NULL;
-					dev->cache_reusable_len--;
-				}
-			}
-		}
-	}
-
-}
-#endif
 // device
 
 struct etna_device *etna_device_new(int fd)
@@ -772,7 +563,7 @@ static void flush(struct etna_cmd_stream *stream, int in_fence_fd,
 	                          &req, sizeof(req));
 
 	if (ret)
-		ERROR_MSG("submit failed: %d (%s)", ret, strerror(errno));
+		ERROR_MSG("etna flush submit failed: %d (%s)", ret, strerror(errno));
 	else
 		priv->last_timestamp = req.fence;
 
@@ -786,7 +577,7 @@ static void flush(struct etna_cmd_stream *stream, int in_fence_fd,
 			priv->pipe->bos[priv->pipe->nr_bos] = bo;
 			priv->pipe->nr_bos++;
 		} else {
-			ERROR_MSG("pipe bos array full");
+			ERROR_MSG("etna flush pipe bos array full");
 		}
 	}
 
