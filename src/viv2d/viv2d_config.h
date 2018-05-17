@@ -1,7 +1,6 @@
 // Global
 #define VIV2D_STREAM_SIZE 1024*32
 #define VIV2D_MAX_RECTS 256
-#define VIV2D_MAX_TMP_PIX 256
 #define VIV2D_PITCH_ALIGN 32
 
 // EXA config
@@ -27,7 +26,7 @@
 //#define VIV2D_SUPPORT_MONO 1
 
 // WIP
-#define VIV2D_A8_SRC_FIX 1 // this fix cause a huge performance drop
+//#define VIV2D_A8_SRC_FIX 1 // this fix cause a huge performance drop
 //#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1
 //#define VIV2D_USERPTR 1

@@ -37,6 +37,8 @@ simplified etnaviv drm based on libdrm
 
 // cache
 
+static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+
 #ifdef ETNA_BO_CACHE_PROFILE
 static uint64_t prof_bucket;
 static uint64_t prof_alloc;
@@ -81,6 +83,8 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 	prof_alloc++;
 #endif
 
+	pthread_mutex_lock(&cache_lock);
+
 	if (!queue_is_empty(bucket->free_bos)) {
 		struct etna_bo *bo = queue_pop_head(bucket->free_bos);
 
@@ -90,6 +94,7 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 #ifdef ETNA_BO_CACHE_PROFILE
 		prof_reuse++;
 #endif
+		pthread_mutex_unlock(&cache_lock);
 		return bo;
 	} else {
 		struct etna_bo *bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
@@ -100,8 +105,12 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 		prof_new++;
 #endif
 		cache->size += aligned_size;
+		pthread_mutex_unlock(&cache_lock);
 		return bo;
 	}
+
+	pthread_mutex_unlock(&cache_lock);
+
 	return NULL;
 };
 
@@ -110,15 +119,21 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 	size_t aligned_bo_size = ALIGN(bo->size, ETNA_BO_CACHE_PAGE_SIZE);
 	uint16_t bucket_size = ETNA_BO_CACHE_BUCKET_SIZE(aligned_bo_size);
 	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
+	pthread_mutex_lock(&cache_lock);
 	queue_push_tail(bucket->unused_bos, bo);
+	pthread_mutex_unlock(&cache_lock);
 	bucket->dirty = 1;
 }
 
 void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
+	pthread_mutex_lock(&cache_lock);
 	uint32_t qsize = queue_size(bucket->unused_bos);
 	for (int i = 0; i < qsize; ++i) {
 		struct etna_bo *unused_bo = queue_peek_head(bucket->unused_bos);
 		if (unused_bo->state == ETNA_BO_READY) { // bos are really free when they are ready
+#ifdef ETNA_BO_CACHE_DEBUG
+			INFO_MSG("etna_bo_cache_clean_bucket: destroy %p", unused_bo);
+#endif
 			unused_bo = queue_pop_head(bucket->unused_bos);
 			queue_push_tail(bucket->free_bos, unused_bo);
 		} else {
@@ -126,10 +141,12 @@ void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
 			bucket->dirty = 1;
 		}
 	}
+	pthread_mutex_unlock(&cache_lock);
 }
 
 void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_bucket *bucket) {
 	struct etna_bo_cache *cache = dev->cache;
+	pthread_mutex_lock(&cache_lock);
 	while (!queue_is_empty(bucket->free_bos)) {
 		struct etna_bo *free_bo = queue_pop_head(bucket->free_bos);
 #ifdef ETNA_BO_CACHE_PROFILE
@@ -141,6 +158,7 @@ void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_
 #endif
 		etna_bo_del(free_bo);
 	}
+	pthread_mutex_unlock(&cache_lock);
 }
 
 void etna_bo_cache_clean(struct etna_device *dev) {
@@ -795,6 +813,10 @@ void etna_bo_del(struct etna_bo *bo)
 
 /* extra */
 
+void etna_nop(struct etna_cmd_stream *stream) {
+	etna_cmd_stream_emit(stream, 0x18000000);
+}
+
 void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns) {
 	int err;
 	struct drm_etnaviv_gem_wait req = {
@@ -834,3 +856,4 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 		return usr_bo;
 	}
 }
+

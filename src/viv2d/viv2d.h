@@ -14,6 +14,8 @@
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
+//#define VIV2D_TRACE 1
+
 #define VIV2D_DBG_MSG(fmt, ...)
 /*#define VIV2D_DBG_MSG(fmt, ...)		\
 		do { xf86Msg(X_INFO, fmt "\n",\
