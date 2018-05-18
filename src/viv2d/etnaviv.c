@@ -844,7 +844,7 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 	int err = drmCommandWriteRead(dev->fd, DRM_ETNAVIV_GEM_USERPTR, &req,
 	                              sizeof(req));
 	if (err) {
-//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
+		INFO_MSG("etna_bo_from_usermem_prot fail: %d", err);
 		return NULL;
 	}
 	else {
@@ -852,7 +852,7 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 		usr_bo = bo_from_handle(dev, size, req.handle, 0);
 		usr_bo->map = memory;
 
-//		VIV2D_INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, mem, req.handle, size);
+		INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, memory, req.handle, size);
 		return usr_bo;
 	}
 }

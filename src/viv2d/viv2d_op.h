@@ -12,7 +12,6 @@
 
 #define ETNAVIV_WAIT_PIPE_MS 1000
 
-
 #define PAGE_SHIFT      12
 #define PAGE_SIZE       (1UL << PAGE_SHIFT)
 #define PAGE_MASK       (~(PAGE_SIZE-1))
@@ -34,7 +33,6 @@ static inline void etna_emit_load_state(struct etna_cmd_stream *stream,
 
 static inline void etna_set_state(struct etna_cmd_stream *stream, uint32_t address, uint32_t value)
 {
-//	etna_cmd_stream_reserve(stream, 2);
 	etna_emit_load_state(stream, address >> 2, 1);
 	etna_cmd_stream_emit(stream, value);
 }
@@ -42,7 +40,6 @@ static inline void etna_set_state(struct etna_cmd_stream *stream, uint32_t addre
 static inline void etna_set_state_from_bo(struct etna_cmd_stream *stream,
         uint32_t address, struct etna_bo *bo)
 {
-//	etna_cmd_stream_reserve(stream, 2);
 	etna_emit_load_state(stream, address >> 2, 1);
 	etna_cmd_stream_reloc(stream, &(struct etna_reloc) {
 		.bo = bo,
@@ -55,16 +52,13 @@ static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t
 {
 	int i;
 	if (num == 0) return;
-//	etna_cmd_stream_reserve(stream, 1 + num); /* 1 extra for potential alignment */
 	etna_emit_load_state(stream, base >> 2, num);
 	for (i = 0; i < num; i++) {
 		etna_cmd_stream_emit(stream, values[i]);
 	}
-
 }
 
-
-static inline Bool Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFormat *fmt)
+static inline Bool _Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFormat *fmt)
 {
 	fmt->bpp = bpp;
 	fmt->depth = depth;
@@ -148,10 +142,6 @@ static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 	if (etna_cmd_stream_avail(v2d->stream) < n) {
 		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
-//		int ret = etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
-//		if (ret != 0) {
-//			VIV2D_INFO_MSG("wait pipe failed");
-//		}
 	}
 }
 
@@ -454,28 +444,13 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
 	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
 
-	VIV2D_DBG_MSG("_Viv2DOpCreateTmpPix %p %dx%d %d", tmp->bo, width, height, pitch * height);
+	VIV2D_DBG_MSG("_Viv2DOpCreateTmpPix bo:%p %dx%d %d", tmp->bo, width, height, pitch * height);
 	tmp->width = width;
 	tmp->height = height;
 	tmp->pitch = pitch;
 
 	return tmp;
 }
-
-/*
-static inline void _Viv2DDummy(Viv2DPtr v2d) {
-		Viv2DRect rect[1];
-		rect[0].x1 = 1;
-		rect[0].y1 = 1;
-		rect[0].x2 = 2;
-		rect[0].y2 = 2;
-
-	Viv2DPixmapPrivPtr tmp = _Viv2DOpCreateTmpPix(v2d, 2, 2, 32);
-	Viv2DSetFormat(32,32,&tmp->format);
-	_Viv2DStreamCopy(v2d, tmp, tmp, NULL, 0, 0, 1, 1,  rect, 1);
-	_Viv2DOpDelTmpPix(v2d, tmp);
-}
-*/
 
 #ifdef VIV2D_TRACE
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -496,7 +471,12 @@ void _Viv2DPixTrace(Viv2DPixmapPrivPtr pix, const char *tag) {
 	tmpBuf = malloc(len);
 	if (!tmpBuf)
 		return;
-	snprintf(tmpBuf, len, "/home/julbouln/traces/%010u_%s_%08x.png", time(NULL), tag, pix);
+
+	time_t now = time(NULL);
+
+	snprintf(tmpBuf, len, "/home/julbouln/traces/%010u_%s_%08x.png", now, tag, pix);
+
+	VIV2D_DBG_MSG("_Viv2DPixTrace time:%010u tag:%s pix:%p bo:%p", now, tag, pix, tmp->bo);
 
 	_Viv2DPixToBmp(pix, tmpBuf);
 	free(tmpBuf);
