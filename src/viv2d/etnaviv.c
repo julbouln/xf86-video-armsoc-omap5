@@ -121,12 +121,13 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
 	pthread_mutex_lock(&cache_lock);
 	queue_push_tail(bucket->unused_bos, bo);
-	pthread_mutex_unlock(&cache_lock);
 	bucket->dirty = 1;
+	pthread_mutex_unlock(&cache_lock);
 }
 
 void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
 	pthread_mutex_lock(&cache_lock);
+	bucket->dirty = 0;
 	uint32_t qsize = queue_size(bucket->unused_bos);
 	for (int i = 0; i < qsize; ++i) {
 		struct etna_bo *unused_bo = queue_peek_head(bucket->unused_bos);
@@ -167,7 +168,6 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 		struct etna_bo_cache_bucket *bucket = &cache->buckets[i];
 		// clean only dirty buckets
 		if (bucket->dirty) {
-			bucket->dirty = 0;
 			etna_bo_cache_clean_bucket(bucket);
 		}
 	}
