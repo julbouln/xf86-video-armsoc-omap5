@@ -192,7 +192,7 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo);
 // extra
 
 void etna_nop(struct etna_cmd_stream *stream);
-void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns);
+int etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns);
 struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size, int flags);
 
 #endif /* ETNAVIV_DRMIF_H_ */

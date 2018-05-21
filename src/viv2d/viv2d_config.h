@@ -22,10 +22,9 @@
 #define VIV2D_SOLID_PICTURE_MSK 1 // support solid clear picture
 #define VIV2D_SUPPORT_A8_MASK 1
 
+// EXPERIMENTAL
 //#define VIV2D_SUPPORT_A8_DST 1
 //#define VIV2D_SUPPORT_MONO 1
-
-// WIP
 //#define VIV2D_A8_SRC_FIX 1 // this fix cause a huge performance drop
 //#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1
@@ -37,7 +36,6 @@
 //#define VIV2D_MIN_SIZE 1024*4 // > 32x32 32bpp
 //#define VIV2D_MIN_SIZE 1024*16 // > 64x64 32bpp
 
-//#define VIV2D_SIZE_CONSTRAINTS 1
-//#define VIV2D_MIN_HW_HEIGHT 64
-//#define VIV2D_MIN_HW_SIZE_24BIT (256 * 256)
-//#define VIV2D_MIN_HW_SIZE_24BIT (4096)
+//#define VIV2D_UNSUPPORTED 1
+//#define VIV2D_DEBUG 1
+//#define VIV2D_TRACE 1

@@ -93,8 +93,8 @@ ARMSOCPixmapExchange(PixmapPtr a, PixmapPtr b)
 
 static void *
 CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
-                    int depth, int bitsPerPixel,
-                    int *new_fb_pitch)
+                int depth, int bitsPerPixel,
+                int *new_fb_pitch)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
@@ -116,8 +116,8 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 
 static void *
 CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
-                  int depth, int bitsPerPixel,
-                  int *new_fb_pitch)
+                 int depth, int bitsPerPixel,
+                 int *new_fb_pitch)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
@@ -211,11 +211,12 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	free(priv);
 }
 
+//#define MAP_USERPTR 1
 
 static Bool
 ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
-                          int depth, int bitsPerPixel, int devKind,
-                          pointer pPixData)
+                      int depth, int bitsPerPixel, int devKind,
+                      pointer pPixData)
 {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
@@ -229,6 +230,8 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		pPixmap->devKind = devKind;
 	}
 
+
+#ifndef MAP_USERPTR
 	/*
 	 * Someone is messing with the memory allocation. Let's step out of
 	 * the picture.
@@ -245,6 +248,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		/* Returning FALSE calls miModifyPixmapHeader */
 		return FALSE;
 	}
+#endif
 
 	if (depth > 0)
 		pPixmap->drawable.depth = depth;
@@ -268,6 +272,35 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		return TRUE;
 
 	size = devKind * height;
+
+	/*
+		 * Someone is messing with the memory allocation. Let's step out of
+		 * the picture.
+		 */
+#ifdef MAP_USERPTR
+	if (pPixData) {
+//			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+		if (pPixData != priv->buf.buf || priv->buf.size != size) {
+			if (priv->buf.buf && pARMSOC->pARMSOCEXA->UnmapUsermemBuf) {
+				pARMSOC->pARMSOCEXA->UnmapUsermemBuf(pARMSOC->pARMSOCEXA, &priv->buf);
+			}
+
+			if (pARMSOC->pARMSOCEXA->MapUsermemBuf && pARMSOC->pARMSOCEXA->MapUsermemBuf(pARMSOC->pARMSOCEXA, width, height, devKind, pPixData, &priv->buf)) {
+				return TRUE;
+			} else {
+				priv->buf.buf = NULL;
+				priv->buf.size = 0;
+				priv->buf.pitch = 0;
+
+				/* Returning FALSE calls miModifyPixmapHeader */
+				return FALSE;
+			}
+		} else {
+			return TRUE;
+		}
+	}
+#endif
+
 	if (!priv->buf.buf || priv->buf.size != size) {
 		/* re-allocate buffer! */
 		if (priv->buf.buf) {
@@ -278,6 +311,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.depth, pPixmap->drawable.bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
+			INFO_MSG("ModifyExaPixmapHeader failed to allocate buffer");
 			ERROR_MSG("failed to allocate %d bytes mem",
 			          size);
 			priv->buf.size = 0;
@@ -292,9 +326,9 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 
 
 static Bool
-ModifyDumbPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
-                        int depth, int bitsPerPixel, int devKind,
-                        pointer pPixData)
+ModifyDumbPixmapHeader(struct ARMSOCPixmapPrivRec * priv, PixmapPtr pPixmap, int width, int height,
+                       int depth, int bitsPerPixel, int devKind,
+                       pointer pPixData)
 {
 	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);

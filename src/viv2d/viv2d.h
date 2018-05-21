@@ -14,18 +14,22 @@
 
 #define ALIGN(val, align)	(((val) + (align) - 1) & ~((align) - 1))
 
-//#define VIV2D_TRACE 1
-
-#define VIV2D_DBG_MSG(fmt, ...)
-/*#define VIV2D_DBG_MSG(fmt, ...)		\
+#ifdef VIV2D_DEBUG
+#define VIV2D_DBG_MSG(fmt, ...)		\
 		do { xf86Msg(X_INFO, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-*/
-#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
-/*#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
+#else
+#define VIV2D_DBG_MSG(fmt, ...)
+#endif
+
+#ifdef VIV2D_UNSUPPORTED
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
 		do { xf86Msg(X_WARNING, fmt "\n",\
 				##__VA_ARGS__); } while (0)
-*/
+#else
+#define VIV2D_UNSUPPORTED_MSG(fmt, ...)
+#endif
+
 //#define VIV2D_INFO_MSG(fmt, ...)
 #define VIV2D_INFO_MSG(fmt, ...) \
 		do { xf86Msg(X_INFO, fmt "\n",\
@@ -278,7 +282,7 @@ static inline const char *Viv2DFormatColorStr(Viv2DFormat *fmt)
 		return "YUY2";
 	case DE_FORMAT_YV12:
 		return "YV12";
-	
+
 	default:
 		return "UNKNOWN";
 	}

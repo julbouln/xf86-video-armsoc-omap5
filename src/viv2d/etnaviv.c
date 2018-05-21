@@ -817,7 +817,7 @@ void etna_nop(struct etna_cmd_stream *stream) {
 	etna_cmd_stream_emit(stream, 0x18000000);
 }
 
-void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns) {
+int etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_bo *bo, uint64_t ns) {
 	int err;
 	struct drm_etnaviv_gem_wait req = {
 		.pipe = pipe->gpu->core,
@@ -831,6 +831,7 @@ void etna_bo_wait(struct etna_device *dev, struct etna_pipe *pipe, struct etna_b
 
 	err = drmCommandWrite(dev->fd, DRM_ETNAVIV_GEM_WAIT,
 	                      &req, sizeof(req));
+	return err;
 }
 
 struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory, size_t size, int flags) {
@@ -849,10 +850,10 @@ struct etna_bo *etna_bo_from_usermem_prot(struct etna_device *dev, void *memory,
 	}
 	else {
 		struct etna_bo *usr_bo = NULL;
-		usr_bo = bo_from_handle(dev, size, req.handle, 0);
-		usr_bo->map = memory;
+		usr_bo = bo_from_handle(dev, size, req.handle, flags);
+//		usr_bo->map = memory;
 
-		INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p %d %d", memory, memory, req.handle, size);
+		INFO_MSG("etna_bo_from_usermem_prot success : mem:%p bo:%p handle:%d size:%d", memory, usr_bo, req.handle, size);
 		return usr_bo;
 	}
 }

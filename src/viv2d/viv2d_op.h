@@ -175,6 +175,21 @@ static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int src
 	_Viv2DStreamSrcWithFormat( v2d,  src,  srcX,  srcY,  width,  height, &src->format);
 }
 
+static inline void _Viv2DStreamEmptySrc(Viv2DPtr v2d, int srcX, int srcY, int width, int height) {
+//	_Viv2DStreamReserve(v2d->stream, 10);
+//	etna_set_state(v2d->stream, VIVS_DE_SRC_ADDRESS, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, 0);
+	etna_set_state(v2d->stream, VIVS_DE_SRC_ORIGIN,
+	               VIVS_DE_SRC_ORIGIN_X(srcX) |
+	               VIVS_DE_SRC_ORIGIN_Y(srcY));
+	etna_set_state(v2d->stream, VIVS_DE_SRC_SIZE,
+	               VIVS_DE_SRC_SIZE_X(width) |
+	               VIVS_DE_SRC_SIZE_Y(height)
+	              );
+}
+
 static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd, int rop, Viv2DRect *clip) {
 //	_Viv2DStreamReserve(v2d->stream, 14);
 
@@ -326,6 +341,7 @@ static inline void _Viv2DStreamFlush(Viv2DPtr v2d) {
 
 #define VIV2D_SRC_PIX_RES 12
 #define VIV2D_SRC_SOLID_RES 8
+#define VIV2D_SRC_EMPTY_RES 10
 #define VIV2D_SRC_1X1_RES 16
 #define VIV2D_DEST_RES 14
 #define VIV2D_BLEND_ON_RES 10
@@ -340,7 +356,7 @@ static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_r
 		reserve += VIV2D_SRC_1X1_RES;
 		break;
 	case viv2d_src_solid:
-		reserve += VIV2D_SRC_SOLID_RES;
+		reserve += VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES;
 		break;
 	default:
 		reserve += VIV2D_SRC_PIX_RES;
@@ -360,7 +376,8 @@ static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_r
 }
 
 static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint32_t color, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
+	_Viv2DStreamEmptySrc(v2d, 0, 0, 0, 0);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, FALSE, 0, FALSE, 0); // reset blend
 	_Viv2DStreamColor(v2d, color);
@@ -369,8 +386,8 @@ static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint3
 }
 
 static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
-	        Bool src_global, uint8_t src_alpha,
-        Bool dst_global, uint8_t dst_alpha,
+                                    Bool src_global, uint8_t src_alpha,
+                                    Bool dst_global, uint8_t dst_alpha,
 
                                     int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
 	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
@@ -397,6 +414,7 @@ static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmap
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, ROP_SRC, NULL);
 		break;
 	case viv2d_src_solid:
+		_Viv2DStreamEmptySrc(v2d, x, y, w, h);
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
 		_Viv2DStreamColor(v2d, color);
 		break;
@@ -462,21 +480,23 @@ void _Viv2DPixToBmp(Viv2DPixmapPrivPtr pix, const char *filename) {
 }
 
 void _Viv2DPixTrace(Viv2DPixmapPrivPtr pix, const char *tag) {
-	time_t tm;
+	struct timeval te;
+
 	char *autime, *s;
 	char *tmpBuf;
 	int len;
 
-	len = 22 + 10 + 1 + 4 + 1 + 8 + 4 + 1;
+	len = 22 + 20 + 1 + 4 + 1 + 8 + 4 + 1;
 	tmpBuf = malloc(len);
 	if (!tmpBuf)
 		return;
 
-	time_t now = time(NULL);
+	gettimeofday(&te, NULL); // get current time
+	long long milliseconds = te.tv_sec * 1000LL + te.tv_usec / 1000; // calculate milliseconds
 
-	snprintf(tmpBuf, len, "/home/julbouln/traces/%010u_%s_%08x.png", now, tag, pix);
+	snprintf(tmpBuf, len, "/home/julbouln/traces/%020llu_%s_%08x.png", milliseconds, tag, pix);
 
-	VIV2D_DBG_MSG("_Viv2DPixTrace time:%010u tag:%s pix:%p bo:%p", now, tag, pix, tmp->bo);
+	VIV2D_DBG_MSG("_Viv2DPixTrace time:%020llu tag:%s pix:%p bo:%p", milliseconds, tag, pix, pix->bo);
 
 	_Viv2DPixToBmp(pix, tmpBuf);
 	free(tmpBuf);
