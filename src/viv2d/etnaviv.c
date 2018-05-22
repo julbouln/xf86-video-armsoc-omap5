@@ -65,13 +65,6 @@ void etna_bo_cache_init(struct etna_device *dev) {
 	}
 }
 
-void etna_bo_cache_destroy(struct etna_device *dev) {
-	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
-		queue_free(dev->cache->buckets[i].unused_bos);
-		queue_free(dev->cache->buckets[i].free_bos);
-	}
-}
-
 struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 	struct etna_bo_cache *cache = dev->cache;
 	size_t aligned_size = ALIGN(size, ETNA_BO_CACHE_PAGE_SIZE);
@@ -89,7 +82,7 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 		struct etna_bo *bo = queue_pop_head(bucket->free_bos);
 
 #ifdef ETNA_BO_CACHE_DEBUG
-		INFO_MSG("etna_cache_bo_new: reuse bo:%p size:%d", bo, size);
+		INFO_MSG("etna_cache_bo_new: reuse bo:%p bo_size:%d cache_size:%d", bo, size, cache->size);
 #endif
 #ifdef ETNA_BO_CACHE_PROFILE
 		prof_reuse++;
@@ -99,7 +92,7 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 	} else {
 		struct etna_bo *bo = etna_bo_new(dev, aligned_size, ETNA_BO_UNCACHED);
 #ifdef ETNA_BO_CACHE_DEBUG
-		INFO_MSG("etna_cache_bo_new: new bo:%p size:%d", bo, size);
+		INFO_MSG("etna_cache_bo_new: new bo:%p bo_size:%d cache_size:%d", bo, size, cache->size);
 #endif
 #ifdef ETNA_BO_CACHE_PROFILE
 		prof_new++;
@@ -126,14 +119,13 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 }
 
 void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
-	pthread_mutex_lock(&cache_lock);
 	bucket->dirty = 0;
 	uint32_t qsize = queue_size(bucket->unused_bos);
 	for (int i = 0; i < qsize; ++i) {
 		struct etna_bo *unused_bo = queue_peek_head(bucket->unused_bos);
 		if (unused_bo->state == ETNA_BO_READY) { // bos are really free when they are ready
 #ifdef ETNA_BO_CACHE_DEBUG
-			INFO_MSG("etna_bo_cache_clean_bucket: destroy %p", unused_bo);
+			INFO_MSG("etna_bo_cache_clean_bucket: remove bo:%p bo_size:%d", unused_bo, unused_bo->size);
 #endif
 			unused_bo = queue_pop_head(bucket->unused_bos);
 			queue_push_tail(bucket->free_bos, unused_bo);
@@ -142,12 +134,10 @@ void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
 			bucket->dirty = 1;
 		}
 	}
-	pthread_mutex_unlock(&cache_lock);
 }
 
 void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_bucket *bucket) {
 	struct etna_bo_cache *cache = dev->cache;
-	pthread_mutex_lock(&cache_lock);
 	while (!queue_is_empty(bucket->free_bos)) {
 		struct etna_bo *free_bo = queue_pop_head(bucket->free_bos);
 #ifdef ETNA_BO_CACHE_PROFILE
@@ -155,25 +145,32 @@ void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_
 #endif
 		cache->size -= ALIGN(free_bo->size, ETNA_BO_CACHE_PAGE_SIZE);
 #ifdef ETNA_BO_CACHE_DEBUG
-		INFO_MSG("etna_cache_bo_del: del bo:%p size:%d", free_bo, free_bo->size);
+		INFO_MSG("etna_cache_bo_del: del bo:%p bo_size:%d cache_size:%d", free_bo, free_bo->size, cache->size);
 #endif
 		etna_bo_del(free_bo);
 	}
-	pthread_mutex_unlock(&cache_lock);
 }
 
 void etna_bo_cache_clean(struct etna_device *dev) {
 	struct etna_bo_cache *cache = dev->cache;
+	pthread_mutex_lock(&cache_lock);
 	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
 		struct etna_bo_cache_bucket *bucket = &cache->buckets[i];
 		// clean only dirty buckets
 		if (bucket->dirty) {
+#ifdef ETNA_BO_CACHE_DEBUG
+			INFO_MSG("etna_bo_cache_clean: clean free_size:%d unused_size:%d", queue_size(bucket->free_bos), queue_size(bucket->unused_bos));
+#endif
 			etna_bo_cache_clean_bucket(bucket);
+			if (queue_size(bucket->free_bos) > 2048) {
+				INFO_MSG("etna_bo_cache_clean: recycle free_size:%d", queue_size(bucket->free_bos));
+				etna_bo_cache_recycle_bucket(dev, bucket);
+			}
 		}
 	}
 
 	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
-		INFO_MSG("etna_bo_cache_clean: recycle %d", cache->size);
+		INFO_MSG("etna_bo_cache_clean: recycle size:%d", cache->size);
 		// clean largest buckets first
 		for (int i = ETNA_BO_CACHE_BUCKETS_COUNT - 1; i >= 0; --i) {
 			if (cache->size > ETNA_BO_CACHE_MAX_SIZE / 2) {
@@ -182,6 +179,16 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 				break;
 			}
 		}
+	}
+	pthread_mutex_unlock(&cache_lock);
+}
+
+void etna_bo_cache_destroy(struct etna_device *dev) {
+
+	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
+		etna_bo_cache_recycle_bucket(dev, &dev->cache->buckets[i]);
+		queue_free(dev->cache->buckets[i].unused_bos);
+		queue_free(dev->cache->buckets[i].free_bos);
 	}
 }
 
@@ -368,12 +375,12 @@ int etna_pipe_wait_ns(struct etna_pipe *pipe, uint32_t timestamp, uint64_t ns)
 		return ret;
 	}
 
+	etna_bo_cache_clean(dev);
+
 	for (int i = 0; i < pipe->nr_bos; i++) {
 		pipe->bos[i]->state = ETNA_BO_READY;
 	}
 	pipe->nr_bos = 0;
-
-	etna_bo_cache_clean(dev);
 
 	return 0;
 }

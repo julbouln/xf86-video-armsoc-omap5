@@ -29,6 +29,7 @@
 //#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1
 //#define VIV2D_USERPTR 1
+#define VIV2D_FLUSH_OPS 1
 
 // CPU only for surface < VIV2D_MIN_SIZE
 #define VIV2D_MIN_SIZE 0 // best result because less cpu-gpu exchange

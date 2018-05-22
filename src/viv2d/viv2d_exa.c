@@ -151,7 +151,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 		buf->priv = (void *)bo;
 		buf->buf = etna_bo_map(bo);
 	} else {
-		VIV2D_DBG_MSG("Viv2DAllocBuf: use CPU only memory %p %d", buf, size);
+		VIV2D_DBG_MSG("Viv2DAllocBuf: use CPU only memory buf:%p size:%d", buf, size);
 		if (size > 0) {
 			buf->priv = NULL;
 			buf->buf = malloc(size);
@@ -166,16 +166,14 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 }
 
 static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
-	VIV2D_DBG_MSG("Viv2DFreeBuf: %p", buf);
+	VIV2D_DBG_MSG("Viv2DFreeBuf buf:%p", buf);
 	if (buf->priv) {
 		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 		Viv2DRec *v2d = v2d_exa->v2d;
 		struct etna_bo *bo = (struct etna_bo *)buf->priv;
-		if (bo) {
-			etna_bo_cache_del(v2d->dev, bo);
-		}
+		etna_bo_cache_del(v2d->dev, bo);
 	} else {
-		VIV2D_DBG_MSG("Viv2DFreeBuf: CPU only memory %p %d", buf, buf->size);
+		VIV2D_DBG_MSG("Viv2DFreeBuf CPU only memory buf:%p size:%d", buf, buf->size);
 		if (buf->buf)
 			free(buf->buf);
 	}
@@ -796,14 +794,15 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	rects[0].x2 = x + w;
 	rects[0].y2 = y + h;
 
-	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1));
+	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1) + VIV2D_FLUSH_RES);
 	_Viv2DStreamSrc(v2d, tmp, src_x, src_y, tmp->width, tmp->height); // tmp source
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, ROP_SRC, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, 0, 0, FALSE, FALSE);
 	_Viv2DStreamRects(v2d, rects, 1);
 
-//	_Viv2DStreamCommit(v2d, TRUE);
-//	exaMarkSync(pDst->drawable.pScreen);
+#ifdef VIV2D_FLUSH_OPS
+	_Viv2DStreamFlush(v2d);
+#endif
 
 	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done dst:%p/%p bo:%p buf:%p src_buf:%p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
 	              pDst, dst, dst->bo, etna_bo_map(dst->bo),

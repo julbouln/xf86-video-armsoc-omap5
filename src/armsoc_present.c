@@ -120,8 +120,6 @@ static Bool
 armsoc_crtc_on(xf86CrtcPtr crtc)
 {
 	struct drmmode_crtc_private_rec * drmmode_crtc = crtc->driver_private;
-
-//	return TRUE;
 	return crtc->enabled && drmmode_crtc->dpms_mode == DPMSModeOn;
 }
 
@@ -417,8 +415,8 @@ armsoc_present_vblank_handler(uint64_t msc, uint64_t usec, void *data)
 {
 	struct armsoc_present_vblank_event *event = data;
 
-	ARMSOC_PRESENT_DBG_MSG("\t\tmh %lld msc %llu\n",
-	              (long long) event->event_id, (long long) msc);
+	ARMSOC_PRESENT_DBG_MSG("\t\tmh %lld msc %llu",
+	                       (long long) event->event_id, (long long) msc);
 
 	present_event_notify(event->event_id, usec, msc);
 	free(event);
@@ -524,9 +522,9 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 		}
 	}
 //	#endif
-	ARMSOC_PRESENT_DBG_MSG("\t\tmq %lld seq %u msc %llu (hw msc %u)\n",
-	              (long long) event_id, seq, (long long) msc,
-	              vbl.request.sequence);
+	ARMSOC_PRESENT_DBG_MSG("\t\tmq %lld seq %u msc %llu (hw msc %u)",
+	                       (long long) event_id, seq, (long long) msc,
+	                       vbl.request.sequence);
 	return Success;
 }
 
@@ -585,8 +583,8 @@ armsoc_present_flip_handler(struct ARMSOCRec * pARMSOC, uint64_t msc,
 	struct armsoc_present_vblank_event *event = data;
 
 	ARMSOC_PRESENT_DBG_MSG("\t\tms:fc %lld msc %llu ust %llu\n",
-	              (long long) event->event_id,
-	              (long long) msc, (long long) ust);
+	                       (long long) event->event_id,
+	                       (long long) msc, (long long) ust);
 
 //    if (event->unflip)
 	//      ms->drmmode.present_flipping = FALSE;
@@ -625,13 +623,13 @@ armsoc_present_check_flip(RRCrtcPtr crtc,
 	int i;
 	ARMSOC_PRESENT_DBG_MSG("armsoc_present_check_flip");
 
-/*
-	if (!ms->drmmode.pageflip)
-		return FALSE;
+	/*
+		if (!ms->drmmode.pageflip)
+			return FALSE;
 
-	if (ms->drmmode.dri2_flipping)
-		return FALSE;
-*/
+		if (ms->drmmode.dri2_flipping)
+			return FALSE;
+	*/
 	if (!scrn->vtSema)
 		return FALSE;
 
@@ -647,9 +645,9 @@ armsoc_present_check_flip(RRCrtcPtr crtc,
 		return FALSE;
 
 	/* Check stride, can't change that on flip */
-/*	if (pixmap->devKind != drmmode_bo_get_pitch(&ms->drmmode.front_bo))
-		return FALSE;
-*/
+	/*	if (pixmap->devKind != drmmode_bo_get_pitch(&ms->drmmode.front_bo))
+			return FALSE;
+	*/
 	/* Make sure there's a bo we can get to */
 	/* XXX: actually do this.  also...is it sufficient?
 	 * if (!glamor_get_pixmap_private(pixmap))
@@ -688,12 +686,12 @@ armsoc_present_flip(RRCrtcPtr crtc,
 		return FALSE;
 
 	ARMSOC_PRESENT_DBG_MSG("\t\tms:pf %lld msc %llu\n",
-	              (long long) event_id, (long long) target_msc);
+	                       (long long) event_id, (long long) target_msc);
 
 	event->event_id = event_id;
 	event->unflip = FALSE;
 
-ret = drmmode_page_flip(&pixmap->drawable, drmmode_crtc->drmmode->fb_id, NULL);
+	ret = drmmode_page_flip(&pixmap->drawable, drmmode_crtc->drmmode->fb_id, NULL);
 
 //	ret = drmmode_page_flip(screen, pixmap, event);
 //    ret = ms_do_pageflip(screen, pixmap, event, drmmode_crtc->vblank_pipe, !sync_flip,

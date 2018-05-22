@@ -282,21 +282,24 @@ static int ARMSOCVideoPutTextureImage(
 	ARMSOCPortPrivPtr pPriv = closure;
 	Bool ret;
 
-	DEBUG_MSG("src: %dx%d; %d,%d %d,%d",
-	          pSrcPix->drawable.width, pSrcPix->drawable.height,
-	          pSrcBox->x1, pSrcBox->y1, pSrcBox->x2, pSrcBox->y2);
-	DEBUG_MSG("dst: %dx%d; %d,%d %d,%d",
-	          pDstPix->drawable.width, pDstPix->drawable.height,
-	          pDstBox->x1, pDstBox->y1, pDstBox->x2, pDstBox->y2);
+	if (pARMSOC->pARMSOCEXA->PutTextureImage) {
+		DEBUG_MSG("src: %dx%d; %d,%d %d,%d",
+		          pSrcPix->drawable.width, pSrcPix->drawable.height,
+		          pSrcBox->x1, pSrcBox->y1, pSrcBox->x2, pSrcBox->y2);
+		DEBUG_MSG("dst: %dx%d; %d,%d %d,%d",
+		          pDstPix->drawable.width, pDstPix->drawable.height,
+		          pDstBox->x1, pDstBox->y1, pDstBox->x2, pDstBox->y2);
 
-	ret = pARMSOC->pARMSOCEXA->PutTextureImage(pSrcPix, pSrcBox,
-	        pOsdPix, pOsdBox, pDstPix, pDstBox, fullDstBox,
-	        pPriv->nplanes - 1, &pPriv->pSrcPix[1],
-	        pPriv->format);
-	if (ret) {
-		return Success;
+		ret = pARMSOC->pARMSOCEXA->PutTextureImage(pSrcPix, pSrcBox,
+		        pOsdPix, pOsdBox, pDstPix, pDstBox, fullDstBox,
+		        pPriv->nplanes - 1, &pPriv->pSrcPix[1],
+		        pPriv->format);
+		if (ret) {
+			return Success;
+		}
 	}
 	DEBUG_MSG("PutTextureImage failed");
+
 
 	return BadImplementation;
 }
@@ -389,29 +392,29 @@ ARMSOCVideoPutImage(ScrnInfoPtr pScrn, short src_x, short src_y, short drw_x,
 	/* note: ARMSOCVidCopyArea() handles the composite-clip, so we can
 	 * ignore clipBoxes
 	 */
-/*	drmVBlank vbl = { .request = {
-			.type = DRM_VBLANK_RELATIVE,
-			.sequence = 0,
-		}
-	};
+	/*	drmVBlank vbl = { .request = {
+				.type = DRM_VBLANK_RELATIVE,
+				.sequence = 0,
+			}
+		};
 
-	ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
-	if (ret) {
-		ERROR_MSG("get vblank counter failed: %s", strerror(errno));
-	}
-*/
+		ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
+		if (ret) {
+			ERROR_MSG("get vblank counter failed: %s", strerror(errno));
+		}
+	*/
 	ret = ARMSOCVidCopyArea(&pPriv->pSrcPix[0]->drawable, &srcb,
 	                        NULL, NULL, pDstDraw, &dstb,
 	                        ARMSOCVideoPutTextureImage, pPriv, clipBoxes);
-/*
-	vbl.request.sequence = vbl.reply.sequence + 1;
-	vbl.request.type = DRM_VBLANK_ABSOLUTE;
+	/*
+		vbl.request.sequence = vbl.reply.sequence + 1;
+		vbl.request.type = DRM_VBLANK_ABSOLUTE;
 
-	ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
-	if (ret) {
-		ERROR_MSG("get vblank counter failed: %s", strerror(errno));
-	}
-*/
+		ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
+		if (ret) {
+			ERROR_MSG("get vblank counter failed: %s", strerror(errno));
+		}
+	*/
 	return ret;
 
 }

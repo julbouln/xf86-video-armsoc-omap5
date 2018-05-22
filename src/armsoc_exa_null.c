@@ -48,8 +48,6 @@ struct ARMSOCNullEXARec {
 	/* add any other driver private data here.. */
 };
 
-
-
 static void FreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
 	free(buf->buf);
 	buf->buf = NULL;
