@@ -133,34 +133,94 @@ viv2d_pict_format[] = {
 	/*END*/
 };
 
-static int VIV2DDetectDevice(const char *name)
-{
-	drmVersionPtr version;
-	char buf[64];
-	int minor, fd, rc;
+static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
+	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+	Viv2DRec *v2d = v2d_exa->v2d;
 
-	for (minor = 0; minor < 64; minor++) {
-		snprintf(buf, sizeof(buf), "%s/card%d", DRM_DIR_NAME,
-		         minor);
+	int pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
+	int size = pitch * height;
 
-		fd = open(buf, O_RDWR);
-		if (fd == -1)
-			continue;
+	VIV2D_DBG_MSG("Viv2DAllocBuf: %p %d", buf, size);
+	Viv2DFormat fmt;
 
-		version = drmGetVersion(fd);
-		if (version) {
-			rc = strcmp(version->name, name);
-			drmFreeVersion(version);
-
-			if (rc == 0) {
-				VIV2D_INFO_MSG("VIV2DDetectDevice %s found at %s", name, buf);
-				return fd;
-			}
+	// do not create etna bo if too small or unsupported format
+	if (size > VIV2D_MIN_SIZE && _Viv2DSetFormat(depth, bpp, &fmt)) {
+		struct etna_bo *bo;
+		//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
+		bo = etna_bo_cache_new(v2d->dev, size);
+		buf->priv = (void *)bo;
+		buf->buf = etna_bo_map(bo);
+	} else {
+		VIV2D_DBG_MSG("Viv2DAllocBuf: use CPU only memory %p %d", buf, size);
+		if (size > 0) {
+			buf->priv = NULL;
+			buf->buf = malloc(size);
+		} else {
+			buf->priv = NULL;
+			buf->buf = NULL;
 		}
-		close(fd);
 	}
 
-	return -1;
+	buf->pitch = pitch;
+	buf->size = size;
+}
+
+static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
+	VIV2D_DBG_MSG("Viv2DFreeBuf: %p", buf);
+	if (buf->priv) {
+		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+		Viv2DRec *v2d = v2d_exa->v2d;
+		struct etna_bo *bo = (struct etna_bo *)buf->priv;
+		if (bo) {
+			etna_bo_cache_del(v2d->dev, bo);
+		}
+	} else {
+		VIV2D_DBG_MSG("Viv2DFreeBuf: CPU only memory %p %d", buf, buf->size);
+		if (buf->buf)
+			free(buf->buf);
+	}
+	buf->priv = NULL;
+	buf->buf = NULL;
+	buf->pitch = 0;
+	buf->size = 0;
+}
+
+static Bool Viv2DMapUsermemBuf(struct ARMSOCEXARec *exa, int width, int height, int pitch, void *data, struct ARMSOCEXABuf *buf) {
+	int size = pitch * height;
+
+	if (((uintptr_t)data % 4096) == 0 && (size % 4096) == 0) {
+		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+		Viv2DRec *v2d = v2d_exa->v2d;
+
+		struct etna_bo *aligned_bo = etna_bo_from_usermem_prot(v2d->dev, data, size, ETNA_USERPTR_READ | ETNA_USERPTR_WRITE);
+		VIV2D_DBG_MSG("Viv2DMapUsermemBuf bo:%p buf:%p", aligned_bo, data);
+
+		buf->priv = aligned_bo;
+		buf->buf = data;
+		buf->size = size;
+		buf->pitch = pitch;
+		return TRUE;
+	} else {
+		return FALSE;
+	}
+}
+
+static void Viv2DUnmapUsermemBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
+	if (buf->priv) {
+		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+		Viv2DRec *v2d = v2d_exa->v2d;
+		struct etna_bo *bo = (struct etna_bo *)buf->priv;
+		_Viv2DStreamCommit(v2d, TRUE);
+//		_Viv2DStreamWait(v2d);
+		int err = etna_bo_wait(v2d->dev, v2d->pipe, bo, 5000000000);
+		VIV2D_DBG_MSG("Viv2DUnmapUsermemBuf bo:%p buf:%p err:%d", bo, buf->buf, err);
+		etna_bo_del(bo);
+
+		buf->priv = NULL;
+		buf->buf = NULL;
+		buf->size = 0;
+		buf->pitch = 0;
+	}
 }
 
 static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapPrivRec *armsocPix) {
@@ -171,7 +231,7 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
 			if (armsocPix->bo && pix->bo && etna_bo_map(pix->bo)) { // dmabuf bo
-				VIV2D_DBG_MSG("Viv2DDetachBo detach %p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
+				VIV2D_DBG_MSG("Viv2DDetachBo detach pix:%p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
 				etna_bo_del(pix->bo);
 			}
 			pix->bo = NULL;
@@ -211,6 +271,22 @@ static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 		VIV2D_INFO_MSG("Viv2DAttachBo failed no armsoc pix");
 	}
 	return FALSE;
+}
+
+static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
+	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
+
+	Viv2DPixmapPrivPtr pix = armsocPix->priv;
+	VIV2D_DBG_MSG("Viv2DReattach pix %p", pix);
+
+	pix->width = width;
+	pix->height = height;
+	pix->pitch = pitch;
+
+	Viv2DDetachBo(pARMSOC, armsocPix);
+	Viv2DAttachBo(pARMSOC, armsocPix);
 }
 
 // from libyuv
@@ -522,113 +598,6 @@ Viv2DDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	ARMSOCDestroyPixmap(pScreen, armsocPix);
 }
 
-static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
-	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
-	Viv2DRec *v2d = v2d_exa->v2d;
-
-	int pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
-	int size = pitch * height;
-
-	VIV2D_DBG_MSG("Viv2DAllocBuf: %p %d", buf, size);
-	Viv2DFormat fmt;
-
-	// do not create etna bo if too small or unsupported format
-	if (size > VIV2D_MIN_SIZE && _Viv2DSetFormat(depth, bpp, &fmt)) {
-		struct etna_bo *bo;
-		//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
-		bo = etna_bo_cache_new(v2d->dev, size);
-		buf->priv = (void *)bo;
-		buf->buf = etna_bo_map(bo);
-	} else {
-		VIV2D_DBG_MSG("Viv2DAllocBuf: use CPU only memory %p %d", buf, size);
-		if (size > 0) {
-			buf->priv = NULL;
-			buf->buf = malloc(size);
-		} else {
-			buf->priv = NULL;
-			buf->buf = NULL;
-		}
-	}
-
-	buf->pitch = pitch;
-	buf->size = size;
-}
-
-static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
-	VIV2D_DBG_MSG("Viv2DFreeBuf: %p", buf);
-	if (buf->priv) {
-		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
-		Viv2DRec *v2d = v2d_exa->v2d;
-		struct etna_bo *bo = (struct etna_bo *)buf->priv;
-		if (bo) {
-			etna_bo_cache_del(v2d->dev, bo);
-		}
-	} else {
-		VIV2D_DBG_MSG("Viv2DFreeBuf: CPU only memory %p %d", buf, buf->size);
-		if (buf->buf)
-			free(buf->buf);
-	}
-	buf->priv = NULL;
-	buf->buf = NULL;
-	buf->pitch = 0;
-	buf->size = 0;
-}
-
-static Bool Viv2DMapUsermemBuf(struct ARMSOCEXARec *exa, int width, int height, int pitch, void *data, struct ARMSOCEXABuf *buf) {
-	int size = pitch * height;
-
-	if (((uintptr_t)data % 4096) == 0 && (size % 4096) == 0) {
-		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
-		Viv2DRec *v2d = v2d_exa->v2d;
-
-		struct etna_bo *aligned_bo = etna_bo_from_usermem_prot(v2d->dev, data, size, ETNA_USERPTR_READ | ETNA_USERPTR_WRITE);
-		VIV2D_DBG_MSG("Viv2DMapUsermemBuf bo:%p buf:%p", aligned_bo, data);
-
-		buf->priv = aligned_bo;
-		buf->buf = data;
-		buf->size = size;
-		buf->pitch = pitch;
-		return TRUE;
-	} else {
-		return FALSE;
-	}
-}
-
-
-static void Viv2DUnmapUsermemBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
-	if (buf->priv) {
-		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
-		Viv2DRec *v2d = v2d_exa->v2d;
-		struct etna_bo *bo = (struct etna_bo *)buf->priv;
-		_Viv2DStreamCommit(v2d, TRUE);
-//		_Viv2DStreamWait(v2d);
-		int err = etna_bo_wait(v2d->dev, v2d->pipe, bo, 5000000000);
-		VIV2D_DBG_MSG("Viv2DUnmapUsermemBuf bo:%p buf:%p err:%d", bo, buf->buf, err);
-		etna_bo_del(bo);
-
-		buf->priv = NULL;
-		buf->buf = NULL;
-		buf->size = 0;
-		buf->pitch = 0;
-	}
-}
-
-static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
-	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
-	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	struct ARMSOCPixmapPrivRec *armsocPix = exaGetPixmapDriverPrivate(pPixmap);
-
-	Viv2DPixmapPrivPtr pix = armsocPix->priv;
-	VIV2D_DBG_MSG("Viv2DReattach pix %p", pix);
-
-	pix->width = width;
-	pix->height = height;
-	pix->pitch = pitch;
-
-	Viv2DDetachBo(pARMSOC, armsocPix);
-	Viv2DAttachBo(pARMSOC, armsocPix);
-}
-
 static Bool
 Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
                         int depth, int bitsPerPixel, int devKind,
@@ -672,9 +641,7 @@ Viv2DModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
 				if (pix->width != width ||
 				        pix->height != height ||
 				        pix->pitch != armsocPix->buf.pitch
-				   )
-
-				{
+				   ) {
 					VIV2D_DBG_MSG("Viv2DModifyPixmapHeader native pixmap:%p armsocPix:%p pix:%p", pPixmap, armsocPix, pix);
 					pix->width = width;
 					pix->height = height;
@@ -2260,7 +2227,7 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	int etnavivFD, scanoutFD;
 	uint64_t model, revision;
 
-	etnavivFD = VIV2DDetectDevice("etnaviv");
+	etnavivFD = ARMSOCDetectDevice("etnaviv");
 
 	if (etnavivFD) {
 		INFO_MSG("Viv2DEXA: Etnaviv driver found");

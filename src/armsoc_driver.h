@@ -237,6 +237,8 @@ void drmmode_init_wakeup_handler(struct ARMSOCRec *pARMSOC);
 void drmmode_fini_wakeup_handler(struct ARMSOCRec *pARMSOC);
 uint32_t drmmode_get_crtc_id(ScrnInfoPtr pScrn);
 
+int ARMSOCDetectDevice(const char *name);
+
 /**
  * DRI2 functions..
  */

@@ -124,6 +124,10 @@ static const OptionInfoRec ARMSOCOptions[] = {
 	{ -1,                NULL,         OPTV_NONE,    {0}, FALSE }
 };
 
+static struct drmmode_interface *interfaces[] = {
+	&omap_interface
+};
+
 /**
  * Helper functions for sharing a DRM connection across screens.
  */
@@ -200,6 +204,36 @@ ARMSOCShowDriverInfo(int fd)
 	return;
 }
 
+int ARMSOCDetectDevice(const char *name)
+{
+	drmVersionPtr version;
+	char buf[64];
+	int minor, fd, rc;
+
+	for (minor = 0; minor < 64; minor++) {
+		snprintf(buf, sizeof(buf), "%s/card%d", DRM_DIR_NAME,
+		         minor);
+
+		fd = open(buf, O_RDWR);
+		if (fd == -1)
+			continue;
+
+		version = drmGetVersion(fd);
+		if (version) {
+			rc = strcmp(version->name, name);
+			drmFreeVersion(version);
+
+			if (rc == 0) {
+				EARLY_INFO_MSG("ARMSOCDetectDevice %s found at %s", name, buf);
+				return fd;
+			}
+		}
+		close(fd);
+	}
+
+	return -1;
+}
+
 static int
 ARMSOCOpenDRMCard(void)
 {
@@ -218,16 +252,30 @@ ARMSOCOpenDRMCard(void)
 	} else {
 		char filename[32];
 		int err;
+		int card_num = -1;
 		drmSetVersion sv;
 		char *bus_id, *bus_id_copy;
 
-		/* open with card_num */
-		snprintf(filename, sizeof(filename),
-		         DRM_DEVICE, connection.card_num);
-		EARLY_INFO_MSG(
-		    "No BusID or DriverName specified - opening %s",
-		    filename);
-		fd = open(filename, O_RDWR, 0);
+		if (connection.card_num) {
+			snprintf(filename, sizeof(filename),
+			         DRM_DEVICE, card_num);
+			EARLY_INFO_MSG(
+			    "No BusID or DriverName specified - opening %s",
+			    filename);
+			fd = open(filename, O_RDWR, 0);
+		} else {
+			for (int i = 0; i < ARRAY_SIZE(interfaces); i++) {
+				struct drmmode_interface *iface = interfaces[i];
+				fd = ARMSOCDetectDevice(iface->driver_name);
+				if (fd != -1) {
+					EARLY_INFO_MSG(
+					    "No card num specified - %s found",
+					    iface->driver_name);
+					break;
+				}
+			}
+		}
+
 		if (-1 == fd)
 			goto fail2;
 		/* Set interface version to initialise bus id */
@@ -238,14 +286,15 @@ ARMSOCOpenDRMCard(void)
 		err = drmSetInterfaceVersion(fd, &sv);
 		if (err) {
 			EARLY_ERROR_MSG(
-			    "Cannot set the DRM interface version.");
+			    "Cannot set the DRM interface version. %d", err);
 			goto fail1;
 		}
+
 		/* get the bus id */
 		bus_id = drmGetBusid(fd);
 		if (!bus_id) {
 			EARLY_ERROR_MSG("Couldn't get BusID from %s",
-			                filename);
+			                connection.driver_name);
 			goto fail1;
 		}
 		EARLY_INFO_MSG("Got BusID %s", bus_id);
@@ -259,7 +308,7 @@ ARMSOCOpenDRMCard(void)
 		err = close(fd);
 		if (err) {
 			free(bus_id_copy);
-			EARLY_ERROR_MSG("Couldn't close %s", filename);
+			EARLY_ERROR_MSG("Couldn't close %s", connection.driver_name);
 			goto fail2;
 		}
 		/* use bus_id to open driver */
@@ -732,17 +781,14 @@ static struct drmmode_interface *get_drmmode_implementation(int drm_fd)
 {
 	drmVersionPtr version;
 	struct drmmode_interface *ret = NULL;
-	struct drmmode_interface *ifaces[] = {
-		&omap_interface
-	};
 	int i;
 
 	version = drmGetVersion(drm_fd);
 	if (!version)
 		return NULL;
 
-	for (i = 0; i < ARRAY_SIZE(ifaces); i++) {
-		struct drmmode_interface *iface = ifaces[i];
+	for (i = 0; i < ARRAY_SIZE(interfaces); i++) {
+		struct drmmode_interface *iface = interfaces[i];
 		if (strcmp(version->name, iface->driver_name) == 0) {
 			ret = iface;
 			break;

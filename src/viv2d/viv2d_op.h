@@ -346,7 +346,11 @@ static inline void _Viv2DStreamFlush(Viv2DPtr v2d) {
 #define VIV2D_DEST_RES 14
 #define VIV2D_BLEND_ON_RES 10
 #define VIV2D_BLEND_OFF_RES 2
+#ifdef VIV2D_FLUSH_OPS
 #define VIV2D_FLUSH_RES 2
+#else
+#define VIV2D_FLUSH_RES 0
+#endif
 #define VIV2D_RECTS_RES(cnt) cnt*2+2
 
 static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_rect, Bool blend) {
@@ -382,7 +386,9 @@ static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint3
 	_Viv2DStreamBlendOp(v2d, NULL, FALSE, 0, FALSE, 0); // reset blend
 	_Viv2DStreamColor(v2d, color);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+#ifdef VIV2D_FLUSH_OPS
 	_Viv2DStreamFlush(v2d);
+#endif
 }
 
 static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst, Viv2DBlendOp *blend_op,
@@ -395,7 +401,9 @@ static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DP
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, ROP_SRC, NULL);
 	_Viv2DStreamBlendOp(v2d, blend_op, src_global, src_alpha, dst_global, dst_alpha);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+#ifdef VIV2D_FLUSH_OPS
 	_Viv2DStreamFlush(v2d);
+#endif
 }
 
 static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
@@ -426,7 +434,9 @@ static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmap
 
 	_Viv2DStreamBlendOp(v2d, blend_op, src_global, src_alpha, dst_global, dst_alpha);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
+#ifdef VIV2D_FLUSH_OPS
 	_Viv2DStreamFlush(v2d);
+#endif
 }
 
 static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivPtr src, Viv2DFormat *src_fmt, int color,
