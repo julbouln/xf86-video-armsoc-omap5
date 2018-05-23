@@ -100,7 +100,7 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
-//		INFO_MSG("AllocBuf create %p", &priv->buf);
+//		INFO_MSG("CreateExaPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
 		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, depth, bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
@@ -128,6 +128,7 @@ CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width,
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
 		/* Pixmap creates and takes a ref on its bo */
+//		INFO_MSG("CreateDumbPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
 		priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
 		                                  width,
 		                                  height,
@@ -155,6 +156,8 @@ CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width,
 			return NULL;
 		}
 		*new_fb_pitch = armsoc_bo_pitch(priv->bo);
+
+//		INFO_MSG("CreateDumbPixmap: new pitch %d",*new_fb_pitch);
 	}
 
 	return priv;
@@ -169,8 +172,6 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
-//   INFO_MSG("ARMSOCCreatePixmap2 %x", priv);
-
 	if (!priv)
 		return NULL;
 
@@ -178,7 +179,10 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 		usage_hint = ARMSOC_CREATE_PIXMAP_SCANOUT;
 		pARMSOC->created_scanout_pixmap = TRUE;
 	}
+
 	priv->usage_hint = usage_hint;
+
+//	INFO_MSG("ARMSOCCreatePixmap2 pix:%p usage:%d %dx%d %d %d", priv, priv->usage_hint, width, height, depth, bitsPerPixel);
 
 	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
 		return CreateDumbPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
@@ -199,12 +203,14 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	 * backing this pixmap. */
 	if (priv->bo) {
 		assert(!armsoc_bo_has_dmabuf(priv->bo));
+//		INFO_MSG("ARMSOCDestroyPixmap bo:%p", priv->bo);
 		/* pixmap drops ref on its bo */
 		armsoc_bo_unreference(priv->bo);
 	}
 
 	if (priv->buf.buf) {
-//			INFO_MSG("FreeBuf destroy %p", &priv->buf);
+//		INFO_MSG("FreeBuf destroy %p", &priv->buf);
+//		INFO_MSG("ARMSOCDestroyPixmap buf:%p", priv->buf);
 		pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 	}
 
@@ -361,6 +367,9 @@ ModifyDumbPixmapHeader(struct ARMSOCPixmapPrivRec * priv, PixmapPtr pPixmap, int
 		struct armsoc_bo *old_bo = priv->bo;
 
 		priv->bo = pARMSOC->scanout;
+
+//		INFO_MSG("ModifyDumbPixmapHeader scanout pix:%p bo:%p, %dx%d %d %d", priv, priv->bo, width, height, depth, bitsPerPixel);
+
 		/* pixmap takes a ref on its new bo */
 		armsoc_bo_reference(priv->bo);
 
@@ -403,6 +412,9 @@ ModifyDumbPixmapHeader(struct ARMSOCPixmapPrivRec * priv, PixmapPtr pPixmap, int
 	        armsoc_bo_bpp(priv->bo) != pPixmap->drawable.bitsPerPixel) {
 		/* pixmap drops ref on its old bo */
 		armsoc_bo_unreference(priv->bo);
+
+//		INFO_MSG("ModifyDumbPixmapHeader %dx%d %d %d", width, height, depth, bitsPerPixel);
+
 		/* pixmap creates new bo and takes ref on it */
 		priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
 		                                  pPixmap->drawable.width,
@@ -443,7 +455,12 @@ ARMSOCModifyPixmapHeader(PixmapPtr pPixmap, int width, int height,
                          int depth, int bitsPerPixel, int devKind,
                          pointer pPixData)
 {
+	ScrnInfoPtr pScrn = pix2scrn(pPixmap);
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(pPixmap);
+
+//	INFO_MSG("ARMSOCModifyPixmapHeader pixmap:%p pix:%p %dx%d %d %d", pPixmap, priv, width, height, depth, bitsPerPixel);
+
 	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
 		return ModifyDumbPixmapHeader(priv, pPixmap, width, height, depth, bitsPerPixel, devKind, pPixData);
 	else

@@ -42,18 +42,16 @@
  * not installed.
  */
 
+#define NULL_DBG_MSG(fmt, ...)
+/*#define NULL_DBG_MSG(fmt, ...)		\
+		do { xf86Msg(X_INFO, fmt "\n",\
+				##__VA_ARGS__); } while (0)
+*/
 struct ARMSOCNullEXARec {
 	struct ARMSOCEXARec base;
 	ExaDriverPtr exa;
 	/* add any other driver private data here.. */
 };
-
-static void FreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
-	free(buf->buf);
-	buf->buf = NULL;
-	buf->pitch = 0;
-	buf->size = 0;
-}
 
 static void AllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
 	int pitch = ((width * bpp + FB_MASK) >> FB_SHIFT) * sizeof(FbBits);
@@ -61,7 +59,21 @@ static void AllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth,
 	buf->buf = malloc(size);
 	buf->pitch = pitch;
 	buf->size = size;
+	NULL_DBG_MSG("AllocBuf buf:%p pitch:%d", buf->buf, pitch);
 }
+
+static void FreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
+	NULL_DBG_MSG("FreeBuf buf:%p", buf->buf);
+	free(buf->buf);
+	buf->buf = NULL;
+	buf->pitch = 0;
+	buf->size = 0;
+}
+
+static void Reattach(PixmapPtr pPixmap, int width, int height, int pitch) {
+	NULL_DBG_MSG("Reattach pixmap:%p", pPixmap);
+}
+
 
 static Bool
 PrepareSolidFail(PixmapPtr pPixmap, int alu, Pixel planemask, Pixel fill_colour)
@@ -171,6 +183,7 @@ InitNullEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		goto free_exa;
 	}
 
+	armsoc_exa->Reattach = Reattach;
 	armsoc_exa->AllocBuf = AllocBuf;
 	armsoc_exa->FreeBuf = FreeBuf;
 

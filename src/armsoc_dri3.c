@@ -90,12 +90,12 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 	PixmapPtr pixmap;
 	struct ARMSOCPixmapPrivRec *priv;
 
+
 	pixmap = pScreen->CreatePixmap(pScreen, width, height, depth, CREATE_PIXMAP_USAGE_BACKING_PIXMAP);
 	if (pixmap == NullPixmap) {
 		ERROR_MSG("ARMSOCDRI3Open cannot create pixmap");
 		return pixmap;
 	}
-	INFO_MSG("ARMSOCDRI3PixmapFromFD %p %dx%d %d/%d %d", pixmap, width, height, depth, bpp, stride);
 
 	pScreen->ModifyPixmapHeader(pixmap, width, height, depth, bpp, stride, NULL);
 
@@ -106,6 +106,8 @@ static PixmapPtr ARMSOCDRI3PixmapFromFD(ScreenPtr pScreen, int fd,
 		pScreen->DestroyPixmap(pixmap);
 		return NullPixmap;
 	}
+
+	INFO_MSG("ARMSOCDRI3PixmapFromFD pixmap:%p pix:%p bo:%p %dx%d %d/%d %d->%d", pixmap, priv, priv->bo, width, height, depth, bpp, stride, pixmap->devKind);
 
 	armsoc_bo_put_dmabuf(priv->bo, fd);
 

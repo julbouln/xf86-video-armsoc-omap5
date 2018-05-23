@@ -804,8 +804,11 @@ void etna_bo_cpu_fini(struct etna_bo *bo)
 /* destroy a buffer object */
 void etna_bo_del(struct etna_bo *bo)
 {
-	if (bo->map)
+
+//	xf86DrvMsg(-1, X_INFO, "etna_bo_del destroy bo:%p map:%p size:%d\n",bo, bo->map, bo->size);
+	if (bo->map) {
 		munmap(bo->map, bo->size);
+	}
 
 	if (bo->handle) {
 		struct drm_gem_close req = {
@@ -814,6 +817,7 @@ void etna_bo_del(struct etna_bo *bo)
 
 		drmIoctl(bo->dev->fd, DRM_IOCTL_GEM_CLOSE, &req);
 	}
+
 
 	free(bo);
 }

@@ -1018,6 +1018,7 @@ ARMSOCAccelInit(ScreenPtr pScreen)
 	if (!pARMSOC->pARMSOCEXA)
 		pARMSOC->pARMSOCEXA = InitNullEXA(pScreen, pScrn,
 		                                  pARMSOC->drmFD);
+	
 	if (pARMSOC->pARMSOCEXA) {
 		pARMSOC->dri2 = ARMSOCDRI2ScreenInit(pScreen); // DRI2
 		pARMSOC->dri3 = ARMSOCDRI3ScreenInit(pScreen); // DRI3

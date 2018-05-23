@@ -145,8 +145,12 @@ armsoc_covering_crtc(ScrnInfoPtr scrn,
 	crtc_box_ret->x2 = 0;
 	crtc_box_ret->y1 = 0;
 	crtc_box_ret->y2 = 0;
+
+//	ARMSOC_PRESENT_DBG_MSG("armsoc_covering_crtc count %d", xf86_config->num_crtc);
 	for (c = 0; c < xf86_config->num_crtc; c++) {
 		crtc = xf86_config->crtc[c];
+
+//		ARMSOC_PRESENT_DBG_MSG("armsoc_covering_crtc crtc %d:%p", c, crtc);
 
 		/* If the CRTC is off, treat it as not covering */
 		if (!armsoc_crtc_on(crtc))
@@ -157,6 +161,7 @@ armsoc_covering_crtc(ScrnInfoPtr scrn,
 		coverage = armsoc_box_area(&cover_box);
 		if (coverage && crtc == desired) {
 			*crtc_box_ret = crtc_box;
+//			ARMSOC_PRESENT_DBG_MSG("armsoc_covering_crtc found crtc %p", crtc);
 			return crtc;
 		}
 		if (coverage > best_coverage) {
@@ -165,6 +170,7 @@ armsoc_covering_crtc(ScrnInfoPtr scrn,
 			best_coverage = coverage;
 		}
 	}
+//	ARMSOC_PRESENT_DBG_MSG("armsoc_covering_crtc best crtc %p", best_crtc);
 	return best_crtc;
 }
 
@@ -173,6 +179,7 @@ armsoc_crtc_covering_drawable(DrawablePtr pDraw)
 {
 	ScreenPtr pScreen = pDraw->pScreen;
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+	xf86CrtcPtr crtc;
 	BoxRec box, crtcbox;
 
 	box.x1 = pDraw->x;
@@ -180,7 +187,9 @@ armsoc_crtc_covering_drawable(DrawablePtr pDraw)
 	box.x2 = box.x1 + pDraw->width;
 	box.y2 = box.y1 + pDraw->height;
 
-	return armsoc_covering_crtc(pScrn, &box, NULL, &crtcbox);
+	crtc = armsoc_covering_crtc(pScrn, &box, NULL, &crtcbox);
+
+	return crtc;
 }
 
 
@@ -274,6 +283,7 @@ armsoc_drm_queue_alloc(xf86CrtcPtr crtc,
 		return 0;
 	if (!armsoc_drm_seq)
 		++armsoc_drm_seq;
+
 	q->seq = armsoc_drm_seq++;
 	q->scrn = scrn;
 	q->crtc = crtc;
@@ -286,70 +296,21 @@ armsoc_drm_queue_alloc(xf86CrtcPtr crtc,
 	return q->seq;
 }
 
-/**
- * Abort one queued DRM entry, removing it
- * from the list, calling the abort function and
- * freeing the memory
- */
 static void
-armsoc_drm_abort_one(struct armsoc_drm_queue *q)
-{
-	xorg_list_del(&q->list);
-	q->abort(q->data);
-	free(q);
-}
-
-/**
- * Abort all queued entries on a specific scrn, used
- * when resetting the X server
- */
-/*
-static void
-armsoc_drm_abort_scrn(ScrnInfoPtr scrn)
+armsoc_drm_abort_event(ScrnInfoPtr scrn, uint64_t event_id)
 {
 	struct armsoc_drm_queue *q, *tmp;
 
 	xorg_list_for_each_entry_safe(q, tmp, &armsoc_drm_queue, list) {
-		if (q->scrn == scrn)
-			armsoc_drm_abort_one(q);
-	}
-}
-*/
-
-/**
- * Abort by drm queue sequence number.
- */
-static void
-armsoc_drm_abort_seq(ScrnInfoPtr scrn, uint32_t seq)
-{
-	struct armsoc_drm_queue *q, *tmp;
-
-	xorg_list_for_each_entry_safe(q, tmp, &armsoc_drm_queue, list) {
-		if (q->seq == seq) {
-			armsoc_drm_abort_one(q);
+		struct armsoc_present_vblank_event *event = q->data;
+		if (event->event_id == event_id) {
+			xorg_list_del(&q->list);
+			q->abort(q->data);
+			free(q);
 			break;
 		}
 	}
 }
-
-/*
- * Externally usable abort function that uses a callback to match a single
- * queued entry to abort
- */
-static void
-armsoc_drm_abort(ScrnInfoPtr scrn, Bool (*match)(void *data, void *match_data),
-                 void *match_data)
-{
-	struct armsoc_drm_queue *q;
-
-	xorg_list_for_each_entry(q, &armsoc_drm_queue, list) {
-		if (match(q->data, match_data)) {
-			armsoc_drm_abort_one(q);
-			break;
-		}
-	}
-}
-
 
 #if 1
 #include <sys/poll.h>
@@ -415,7 +376,7 @@ armsoc_present_vblank_handler(uint64_t msc, uint64_t usec, void *data)
 {
 	struct armsoc_present_vblank_event *event = data;
 
-	ARMSOC_PRESENT_DBG_MSG("\t\tmh %lld msc %llu",
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_vblank_handler event_id:%llu msc:%llu",
 	                       (long long) event->event_id, (long long) msc);
 
 	present_event_notify(event->event_id, usec, msc);
@@ -480,7 +441,6 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 	xf86CrtcPtr xf86_crtc = crtc->devPrivate;
 	ScreenPtr screen = crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
-//    modesettingPtr ms = modesettingPTR(scrn);
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(scrn);
 	struct drmmode_crtc_private_rec * drmmode_crtc = xf86_crtc->driver_private;
 	struct armsoc_present_vblank_event *event;
@@ -488,7 +448,7 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 	int ret;
 	uint32_t seq;
 
-	ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank");
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank event_id:%llu msc:%llu", event_id, msc);
 
 	event = calloc(sizeof(struct armsoc_present_vblank_event), 1);
 	if (!event)
@@ -505,11 +465,11 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 	vbl.request.type =
 	    DRM_VBLANK_ABSOLUTE | DRM_VBLANK_EVENT | drmmode_crtc->vblank_pipe;
 	vbl.request.sequence = armsoc_crtc_msc_to_kernel_msc(xf86_crtc, msc);
-	vbl.request.signal = seq;
+	vbl.request.signal = (unsigned long)event;
 //#ifdef ARMSOC_PRESENT_WAIT_VBLANK
 	for (;;) {
 		ret = drmWaitVBlank(pARMSOC->drmFD, &vbl);
-		ARMSOC_PRESENT_DBG_MSG("drmWaitVBlank %d", ret);
+		ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank drmWaitVBlank %d", ret);
 		if (!ret)
 			break;
 		/* If we hit EBUSY, then try to flush events.  If we can't, then
@@ -517,12 +477,12 @@ armsoc_present_queue_vblank(RRCrtcPtr crtc,
 		 */
 		if (errno != EBUSY || armsoc_flush_drm_events(screen) < 0) {
 			ARMSOC_PRESENT_DBG_MSG("abort %d", errno);
-			armsoc_drm_abort_seq(scrn, seq);
+			armsoc_drm_abort_event(scrn, event_id);
 			return BadAlloc;
 		}
 	}
 //	#endif
-	ARMSOC_PRESENT_DBG_MSG("\t\tmq %lld seq %u msc %llu (hw msc %u)",
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_queue_vblank event_id:%llu seq:%u msc:%llu (sequence:%u)",
 	                       (long long) event_id, seq, (long long) msc,
 	                       vbl.request.sequence);
 	return Success;
@@ -547,9 +507,10 @@ armsoc_present_abort_vblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
 {
 	ScreenPtr screen = crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+	struct armsoc_drm_queue *q;
 	ARMSOC_PRESENT_DBG_MSG("armsoc_present_abort_vblank");
 
-	armsoc_drm_abort(scrn, armsoc_present_event_match, &event_id);
+	armsoc_drm_abort_event(scrn, event_id);
 }
 
 /*
@@ -563,6 +524,8 @@ armsoc_present_flush(WindowPtr window)
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
 //    modesettingPtr ms = modesettingPTR(scrn);
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(scrn);
+
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_flush");
 
 //    if (ms->drmmode.glamor)
 //      glamor_block_handler(screen);
@@ -582,7 +545,7 @@ armsoc_present_flip_handler(struct ARMSOCRec * pARMSOC, uint64_t msc,
 {
 	struct armsoc_present_vblank_event *event = data;
 
-	ARMSOC_PRESENT_DBG_MSG("\t\tms:fc %lld msc %llu ust %llu\n",
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_flip_handler event_id:%llu msc:%llu ust:%llu\n",
 	                       (long long) event->event_id,
 	                       (long long) msc, (long long) ust);
 
@@ -600,7 +563,7 @@ armsoc_present_flip_abort(struct ARMSOCRec * pARMSOC, void *data)
 {
 	struct armsoc_present_vblank_event *event = data;
 
-	ARMSOC_PRESENT_DBG_MSG("\t\tms:fa %lld\n", (long long) event->event_id);
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_flip_abort ms:fa %lld\n", (long long) event->event_id);
 
 	free(event);
 }
@@ -623,13 +586,6 @@ armsoc_present_check_flip(RRCrtcPtr crtc,
 	int i;
 	ARMSOC_PRESENT_DBG_MSG("armsoc_present_check_flip");
 
-	/*
-		if (!ms->drmmode.pageflip)
-			return FALSE;
-
-		if (ms->drmmode.dri2_flipping)
-			return FALSE;
-	*/
 	if (!scrn->vtSema)
 		return FALSE;
 
@@ -670,7 +626,6 @@ armsoc_present_flip(RRCrtcPtr crtc,
 {
 	ScreenPtr screen = crtc->pScreen;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
-//    modesettingPtr ms = modesettingPTR(scrn);
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(scrn);
 	xf86CrtcPtr xf86_crtc = crtc->devPrivate;
 	struct drmmode_crtc_private_rec * drmmode_crtc = xf86_crtc->driver_private;
@@ -685,7 +640,7 @@ armsoc_present_flip(RRCrtcPtr crtc,
 	if (!event)
 		return FALSE;
 
-	ARMSOC_PRESENT_DBG_MSG("\t\tms:pf %lld msc %llu\n",
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_flip ms:pf %lld msc %llu\n",
 	                       (long long) event_id, (long long) target_msc);
 
 	event->event_id = event_id;
@@ -693,9 +648,6 @@ armsoc_present_flip(RRCrtcPtr crtc,
 
 	ret = drmmode_page_flip(&pixmap->drawable, drmmode_crtc->drmmode->fb_id, NULL);
 
-//	ret = drmmode_page_flip(screen, pixmap, event);
-//    ret = ms_do_pageflip(screen, pixmap, event, drmmode_crtc->vblank_pipe, !sync_flip,
-//                         armsoc_present_flip_handler, armsoc_present_flip_abort);
 	if (!ret)
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR, "present flip failed\n");
 //	else
@@ -711,7 +663,6 @@ static void
 armsoc_present_unflip(ScreenPtr screen, uint64_t event_id)
 {
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
-//    modesettingPtr ms = modesettingPTR(scrn);
 	struct ARMSOCRec * pARMSOC = ARMSOCPTR(scrn);
 	PixmapPtr pixmap = screen->GetScreenPixmap(screen);
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
@@ -727,8 +678,6 @@ armsoc_present_unflip(ScreenPtr screen, uint64_t event_id)
 
 	if (armsoc_present_check_flip(NULL, screen->root, pixmap, TRUE) &&
 	        drmmode_page_flip(screen, pixmap, event)
-//        ms_do_pageflip(screen, pixmap, event, -1, FALSE,
-//                       armsoc_present_flip_handler, armsoc_present_flip_abort)
 	   ) {
 		return;
 	}
@@ -788,10 +737,11 @@ armsoc_drm_handler(int fd, uint32_t frame, uint32_t sec, uint32_t usec,
                    void *user_ptr)
 {
 	struct armsoc_drm_queue *q, *tmp;
-	uint32_t user_data = (uint32_t) (intptr_t) user_ptr;
+
+	ARMSOC_PRESENT_DBG_MSG("armsoc_drm_handler fd:%d frame:%d sec:%d usec:%d", fd, frame, sec, usec);
 
 	xorg_list_for_each_entry_safe(q, tmp, &armsoc_drm_queue, list) {
-		if (q->seq == user_data) {
+		if (q->data == user_ptr) {
 			uint64_t msc;
 
 			msc = armsoc_kernel_msc_to_crtc_msc(q->crtc, frame);
@@ -812,6 +762,8 @@ armsoc_present_screen_init(ScreenPtr screen)
 	uint64_t value;
 	int ret;
 
+	ARMSOC_PRESENT_DBG_MSG("armsoc_present_screen_init");
+
 	xorg_list_init(&armsoc_drm_queue);
 
 	event_context.version = DRM_EVENT_CONTEXT_VERSION;
@@ -819,8 +771,10 @@ armsoc_present_screen_init(ScreenPtr screen)
 	event_context.page_flip_handler = armsoc_drm_handler;
 
 	ret = drmGetCap(pARMSOC->drmFD, DRM_CAP_ASYNC_PAGE_FLIP, &value);
-	if (ret == 0 && value == 1)
+	if (ret == 0 && value == 1) {
+		ARMSOC_PRESENT_DBG_MSG("armsoc_present_screen_init PresentCapabilityAsync enable");
 		armsoc_present_screen_info.capabilities |= PresentCapabilityAsync;
+	}
 
 	return present_screen_init(screen, &armsoc_present_screen_info);
 }

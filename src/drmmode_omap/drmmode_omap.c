@@ -123,6 +123,8 @@ static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
 	/* 32 bytes pitch for OMAP = 16 bytes pitch for gc320 */
 	pitch = ALIGN(create_gem->width * ((create_gem->bpp + 7) / 8), 32);
 
+//	xf86Msg(X_INFO, "create_custom_gem: %d %d %d\n",create_gem->width,create_gem->bpp,pitch);
+
 	if (create_gem->buf_type == ARMSOC_BO_SCANOUT)
 		flags |= OMAP_BO_SCANOUT;
 

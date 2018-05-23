@@ -73,8 +73,8 @@ struct armsoc_bo {
  */
 
 struct armsoc_device *armsoc_device_new(int fd,
-			int (*create_custom_gem)(int fd,
-				struct armsoc_create_gem *create_gem))
+                                        int (*create_custom_gem)(int fd,
+                                                struct armsoc_create_gem *create_gem))
 {
 	struct armsoc_device *new_dev = calloc(1, sizeof(*new_dev));
 	if (!new_dev)
@@ -96,7 +96,8 @@ void armsoc_device_del(struct armsoc_device *dev)
 
 int armsoc_bo_set_dmabuf(struct armsoc_bo *bo)
 {
-	int res;
+	int res = 0;
+	#if 0
 	struct drm_prime_handle prime_handle;
 
 	assert(bo->refcnt > 0);
@@ -106,12 +107,12 @@ int armsoc_bo_set_dmabuf(struct armsoc_bo *bo)
 	prime_handle.handle = bo->handle;
 	prime_handle.flags  = 0;
 	res  = drmIoctl(bo->dev->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD,
-						&prime_handle);
+	                &prime_handle);
 	if (res)
 		res = errno;
 	else
 		bo->dmabuf = prime_handle.fd;
-
+	#endif
 	return res;
 }
 
@@ -142,7 +143,7 @@ int armsoc_bo_get_dmabuf(struct armsoc_bo *bo)
 	prime_handle.handle = bo->handle;
 	prime_handle.flags  = 0;
 	res  = drmIoctl(bo->dev->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD,
-						&prime_handle);
+	                &prime_handle);
 	if (res)
 		res = -errno;
 	else
@@ -191,10 +192,10 @@ void armsoc_bo_put_dmabuf(struct armsoc_bo *bo, int fd)
 }
 
 struct armsoc_bo *armsoc_bo_new_with_dim(struct armsoc_device *dev,
-			uint32_t width, uint32_t height, uint8_t depth,
-			uint8_t bpp, enum armsoc_buf_type buf_type)
+        uint32_t width, uint32_t height, uint8_t depth,
+        uint8_t bpp, enum armsoc_buf_type buf_type)
 {
-	struct armsoc_create_gem create_gem;
+//	struct armsoc_create_gem create_gem;
 	struct armsoc_bo *new_buf;
 	int res;
 
@@ -202,17 +203,34 @@ struct armsoc_bo *armsoc_bo_new_with_dim(struct armsoc_device *dev,
 	if (!new_buf)
 		return NULL;
 
-	create_gem.buf_type = buf_type;
-	create_gem.height = height;
+	/*
+		create_gem.buf_type = buf_type;
+		create_gem.height = height;
+		create_gem.width = width;
+		create_gem.bpp = bpp;
+		res = dev->create_custom_gem(dev->fd, &create_gem);
+		if (res) {
+			free(new_buf);
+			xf86DrvMsg(-1, X_ERROR,
+			           "_CREATE_GEM({height: %d, width: %d, bpp: %d buf_type: 0x%X}) failed. errno: %d - %s\n",
+			           height, width, bpp, buf_type,
+			           errno, strerror(errno));
+			return NULL;
+		}
+		*/
+	struct drm_mode_create_dumb create_gem;
+	memset(&create_gem, 0, sizeof(create_gem));
 	create_gem.width = width;
+	create_gem.height = height;
 	create_gem.bpp = bpp;
-	res = dev->create_custom_gem(dev->fd, &create_gem);
+
+	res = drmIoctl(dev->fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_gem);
 	if (res) {
 		free(new_buf);
 		xf86DrvMsg(-1, X_ERROR,
-			"_CREATE_GEM({height: %d, width: %d, bpp: %d buf_type: 0x%X}) failed. errno: %d - %s\n",
-				height, width, bpp, buf_type,
-				errno, strerror(errno));
+		           "_CREATE_GEM({height: %d, width: %d, bpp: %d buf_type: 0x%X}) failed. errno: %d - %s\n",
+		           height, width, bpp, buf_type,
+		           errno, strerror(errno));
 		return NULL;
 	}
 
@@ -256,13 +274,14 @@ static void armsoc_bo_del(struct armsoc_bo *bo)
 		res = drmModeRmFB(bo->dev->fd, bo->fb_id);
 		if (res)
 			xf86DrvMsg(-1, X_ERROR, "drmModeRmFb failed %d : %s\n",
-				res, strerror(errno));
+			           res, strerror(errno));
 	}
 	destroy_dumb.handle = bo->handle;
+
 	res = drmIoctl(bo->dev->fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy_dumb);
 	if (res)
 		xf86DrvMsg(-1, X_ERROR, "destroy dumb failed %d : %s\n",
-			res, strerror(errno));
+		           res, strerror(errno));
 
 	free(bo);
 }
@@ -273,8 +292,10 @@ void armsoc_bo_unreference(struct armsoc_bo *bo)
 		return;
 
 	assert(bo->refcnt > 0);
-	if (--bo->refcnt == 0)
+	if (--bo->refcnt == 0) {
+//		xf86DrvMsg(-1, X_INFO, "armsoc_bo_unreference destroy dumb bo:%p map:%p size:%d\n",bo, bo->map_addr, bo->size);
 		armsoc_bo_del(bo);
+	}
 }
 
 void armsoc_bo_reference(struct armsoc_bo *bo)
@@ -295,8 +316,8 @@ int armsoc_bo_get_name(struct armsoc_bo *bo, uint32_t *name)
 		ret = drmIoctl(bo->dev->fd, DRM_IOCTL_GEM_FLINK, &flink);
 		if (ret) {
 			xf86DrvMsg(-1, X_ERROR,
-					"_GEM_FLINK(handle:0x%X)failed. errno:0x%X\n",
-					flink.handle, errno);
+			           "_GEM_FLINK(handle:0x%X)failed. errno:0x%X\n",
+			           flink.handle, errno);
 			return ret;
 		}
 
@@ -365,8 +386,8 @@ void *armsoc_bo_map(struct armsoc_bo *bo)
 
 		/* always map/unmap the full buffer for consistency */
 		bo->map_addr = mmap(NULL, bo->original_size,
-				PROT_READ | PROT_WRITE, MAP_SHARED,
-				bo->dev->fd, map_dumb.offset);
+		                    PROT_READ | PROT_WRITE, MAP_SHARED,
+		                    bo->dev->fd, map_dumb.offset);
 
 		if (bo->map_addr == MAP_FAILED)
 			bo->map_addr = NULL;
@@ -391,10 +412,10 @@ int armsoc_bo_cpu_prep(struct armsoc_bo *bo, enum armsoc_gem_op op)
 
 		do {
 			t = timeout;
-			ret = select(bo->dmabuf+1, &fds, NULL, NULL, &t);
+			ret = select(bo->dmabuf + 1, &fds, NULL, NULL, &t);
 			if (ret == 0)
 				xf86DrvMsg(-1, X_ERROR,
-					"select() on dma_buf fd has timed-out\n");
+				           "select() on dma_buf fd has timed-out\n");
 		} while ((ret == -1 && errno == EINTR) || ret == 0);
 
 		if (ret > 0)
@@ -420,9 +441,9 @@ int armsoc_bo_add_fb(struct armsoc_bo *bo)
 		depth = 24;
 
 	ret = drmModeAddFB(bo->dev->fd, bo->width, bo->height, depth,
-		bo->bpp, bo->pitch, bo->handle, &bo->fb_id);
+	                   bo->bpp, bo->pitch, bo->handle, &bo->fb_id);
 
-xf86DrvMsg(-1, X_WARNING,"%d %d %d",ret,bo->width, bo->height);
+	xf86DrvMsg(-1, X_WARNING, "%d %d %d", ret, bo->width, bo->height);
 
 	if (ret < 0 && bo->bpp == 32 && bo->depth == 32 && bo->dev->alpha_supported) {
 		/* The DRM driver may not support an alpha channel but
@@ -431,10 +452,10 @@ xf86DrvMsg(-1, X_WARNING,"%d %d %d",ret,bo->width, bo->height);
 		 * fails we retry with depth 24, bpp 32
 		 */
 		xf86DrvMsg(-1, X_WARNING,
-				"depth 32 FB unsupported : falling back to depth 24\n");
+		           "depth 32 FB unsupported : falling back to depth 24\n");
 		bo->dev->alpha_supported = FALSE;
 		ret = drmModeAddFB(bo->dev->fd, bo->width, bo->height, 24,
-				bo->bpp, bo->pitch, bo->handle, &bo->fb_id);
+		                   bo->bpp, bo->pitch, bo->handle, &bo->fb_id);
 	}
 
 	if (ret < 0) {
@@ -453,7 +474,7 @@ int armsoc_bo_rm_fb(struct armsoc_bo *bo)
 	ret = drmModeRmFB(bo->dev->fd, bo->fb_id);
 	if (ret < 0) {
 		xf86DrvMsg(-1, X_ERROR,
-			"Could not remove fb from bo %d\n", ret);
+		           "Could not remove fb from bo %d\n", ret);
 		return ret;
 	}
 	bo->fb_id = 0;
@@ -474,13 +495,13 @@ int armsoc_bo_clear(struct armsoc_bo *bo)
 	dst = armsoc_bo_map(bo);
 	if (!dst) {
 		xf86DrvMsg(-1, X_ERROR,
-				"Couldn't map scanout bo\n");
+		           "Couldn't map scanout bo\n");
 		return -1;
 	}
 	if (armsoc_bo_cpu_prep(bo, ARMSOC_GEM_WRITE)) {
 		xf86DrvMsg(-1, X_ERROR,
-			" %s: armsoc_bo_cpu_prep failed - unable to synchronise access.\n",
-			__func__);
+		           " %s: armsoc_bo_cpu_prep failed - unable to synchronise access.\n",
+		           __func__);
 		return -1;
 	}
 	memset(dst, 0x0, bo->size);
@@ -489,7 +510,7 @@ int armsoc_bo_clear(struct armsoc_bo *bo)
 }
 
 int armsoc_bo_resize(struct armsoc_bo *bo, uint32_t new_width,
-						uint32_t new_height)
+                     uint32_t new_height)
 {
 	uint32_t new_size;
 	uint32_t new_pitch;
@@ -504,17 +525,17 @@ int armsoc_bo_resize(struct armsoc_bo *bo, uint32_t new_width,
 	assert(bo->refcnt > 0);
 
 	xf86DrvMsg(-1, X_INFO, "Resizing bo from %dx%d to %dx%d\n",
-			bo->width, bo->height, new_width, new_height);
+	           bo->width, bo->height, new_width, new_height);
 
 	/* TODO: MIDEGL-1563: Get pitch from DRM as
 	 * only DRM knows the ideal pitch and alignment
 	 * requirements
 	 * */
-	new_pitch  = new_width * ((armsoc_bo_bpp(bo)+7)/8);
+	new_pitch  = new_width * ((armsoc_bo_bpp(bo) + 7) / 8);
 	/* Align pitch to 64 byte */
 	new_pitch  = ALIGN(new_pitch, 64);
-	new_size   = (((new_height-1) * new_pitch) +
-			(new_width * ((armsoc_bo_bpp(bo)+7)/8)));
+	new_size   = (((new_height - 1) * new_pitch) +
+	              (new_width * ((armsoc_bo_bpp(bo) + 7) / 8)));
 
 	if (new_size <= bo->original_size) {
 		bo->width  = new_width;

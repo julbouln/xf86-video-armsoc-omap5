@@ -140,7 +140,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 	int pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
 	int size = pitch * height;
 
-	VIV2D_DBG_MSG("Viv2DAllocBuf: %p %d", buf, size);
+	VIV2D_DBG_MSG("Viv2DAllocBuf: buf:%p size:%d", buf, ALIGN(size,4096));
 	Viv2DFormat fmt;
 
 	// do not create etna bo if too small or unsupported format
@@ -166,7 +166,7 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 }
 
 static void Viv2DFreeBuf(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf) {
-	VIV2D_DBG_MSG("Viv2DFreeBuf buf:%p", buf);
+	VIV2D_DBG_MSG("Viv2DFreeBuf buf:%p size:%d", buf, ALIGN(buf->size, 4096));
 	if (buf->priv) {
 		Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 		Viv2DRec *v2d = v2d_exa->v2d;
@@ -228,8 +228,8 @@ static inline void Viv2DDetachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 
 		if (armsocPix->bo == pARMSOC->scanout) {
 		} else {
-			if (armsocPix->bo && pix->bo && etna_bo_map(pix->bo)) { // dmabuf bo
-				VIV2D_DBG_MSG("Viv2DDetachBo detach pix:%p bo:%p refcnt:%d", pix, pix->bo, pix->refcnt);
+			if (armsocPix->bo && pix->bo) {
+				VIV2D_DBG_MSG("Viv2DDetachBo detach pix:%p bo:%p dumbBo:%p refcnt:%d", pix, pix->bo, armsocPix->bo, pix->refcnt);
 				etna_bo_del(pix->bo);
 			}
 			pix->bo = NULL;
@@ -250,7 +250,7 @@ static inline Bool Viv2DAttachBo(struct ARMSOCRec *pARMSOC, struct ARMSOCPixmapP
 				if (fd) {
 					pix->bo = etna_bo_from_dmabuf(v2d->dev, fd);
 					close(fd);
-					VIV2D_DBG_MSG("Viv2DAttachBo attach from dmabuf pix:%p bo:%p", pix, pix->bo);
+					VIV2D_DBG_MSG("Viv2DAttachBo attach from dmabuf pix:%p bo:%p dumbBo:%p", pix, pix->bo, armsocPix->bo);
 				} else {
 					VIV2D_ERR_MSG("Viv2DAttachBo error cannot attach bo : %d", fd);
 				}
@@ -2366,9 +2366,9 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 	etnaviv_init_filter_kernel();
 
 	armsoc_exa->AllocBuf = Viv2DAllocBuf;
+	armsoc_exa->FreeBuf = Viv2DFreeBuf;
 	armsoc_exa->MapUsermemBuf = Viv2DMapUsermemBuf;
 	armsoc_exa->UnmapUsermemBuf = Viv2DUnmapUsermemBuf;
-	armsoc_exa->FreeBuf = Viv2DFreeBuf;
 	armsoc_exa->Reattach = Viv2DReattach;
 	armsoc_exa->GetFormats = Viv2DGetFormats;
 #ifdef VIV2D_PUT_TEXTURE_IMAGE
