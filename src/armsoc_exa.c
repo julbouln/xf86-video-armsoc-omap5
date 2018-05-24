@@ -38,6 +38,10 @@
 //#define ARMSOC_BO_MIN_SIZE (1024 * 1024)
 //#define ARMSOC_BO_MIN_SIZE 0
 
+//#define ARMSOC_EXA_MAP_USERPTR 1
+
+//#define ARMSOC_EXA_DEBUG 1
+
 Bool
 IsDumbPixmap(struct ARMSOCPixmapPrivRec *priv, int size)
 {
@@ -100,7 +104,9 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
-//		INFO_MSG("CreateExaPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
+#ifdef ARMSOC_EXA_DEBUG
+		INFO_MSG("CreateExaPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
+#endif
 		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, depth, bitsPerPixel, &priv->buf);
 
 		if (!priv->buf.buf) {
@@ -128,7 +134,9 @@ CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width,
 
 	if (width > 0 && height > 0 && depth > 0 && bitsPerPixel > 0) {
 		/* Pixmap creates and takes a ref on its bo */
-//		INFO_MSG("CreateDumbPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
+#ifdef ARMSOC_EXA_DEBUG
+		INFO_MSG("CreateDumbPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
+#endif
 		priv->bo = armsoc_bo_new_with_dim(pARMSOC->dev,
 		                                  width,
 		                                  height,
@@ -182,7 +190,9 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 
 	priv->usage_hint = usage_hint;
 
-//	INFO_MSG("ARMSOCCreatePixmap2 pix:%p usage:%d %dx%d %d %d", priv, priv->usage_hint, width, height, depth, bitsPerPixel);
+#ifdef ARMSOC_EXA_DEBUG
+	INFO_MSG("ARMSOCCreatePixmap2 pix:%p usage:%d %dx%d %d %d", priv, priv->usage_hint, width, height, depth, bitsPerPixel);
+#endif
 
 	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
 		return CreateDumbPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
@@ -203,21 +213,22 @@ ARMSOCDestroyPixmap(ScreenPtr pScreen, void *driverPriv)
 	 * backing this pixmap. */
 	if (priv->bo) {
 		assert(!armsoc_bo_has_dmabuf(priv->bo));
-//		INFO_MSG("ARMSOCDestroyPixmap bo:%p", priv->bo);
+#ifdef ARMSOC_EXA_DEBUG
+		INFO_MSG("ARMSOCDestroyPixmap bo:%p", priv->bo);
+#endif
 		/* pixmap drops ref on its bo */
 		armsoc_bo_unreference(priv->bo);
 	}
 
 	if (priv->buf.buf) {
-//		INFO_MSG("FreeBuf destroy %p", &priv->buf);
-//		INFO_MSG("ARMSOCDestroyPixmap buf:%p", priv->buf);
+#ifdef ARMSOC_EXA_DEBUG
+		INFO_MSG("ARMSOCDestroyPixmap buf:%p", priv->buf);
+#endif
 		pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 	}
 
 	free(priv);
 }
-
-//#define MAP_USERPTR 1
 
 static Bool
 ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int width, int height,
@@ -237,12 +248,15 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 	}
 
 
-#ifndef MAP_USERPTR
+#ifndef ARMSOC_EXA_MAP_USERPTR
 	/*
 	 * Someone is messing with the memory allocation. Let's step out of
 	 * the picture.
 	 */
 	if (pPixData && pPixData != priv->buf.buf) {
+#ifdef ARMSOC_EXA_DEBUG
+			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+#endif
 		if (priv->buf.buf) {
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
 		}
@@ -283,9 +297,11 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		 * Someone is messing with the memory allocation. Let's step out of
 		 * the picture.
 		 */
-#ifdef MAP_USERPTR
+#ifdef ARMSOC_EXA_MAP_USERPTR
 	if (pPixData) {
-//			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+#ifdef ARMSOC_EXA_DEBUG
+			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+#endif
 		if (pPixData != priv->buf.buf || priv->buf.size != size) {
 			if (priv->buf.buf && pARMSOC->pARMSOCEXA->UnmapUsermemBuf) {
 				pARMSOC->pARMSOCEXA->UnmapUsermemBuf(pARMSOC->pARMSOCEXA, &priv->buf);

@@ -44,6 +44,7 @@ struct ARMSOCEXABuf {
 	size_t size;
 	int pitch;
 	void *priv;
+	int usermem;
 };
 
 /**

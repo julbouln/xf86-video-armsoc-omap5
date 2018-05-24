@@ -8,11 +8,15 @@
 #define ETNA_PIPE_BOS_SIZE 1024*4 // max pipe bos
 
 #define ETNA_BO_CACHE_MAX_SIZE 1024*1024*64 // 64 Mbytes
+#define ETNA_BO_CACHE_MAX_BOS_PER_BUCKET 2048
+#define ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET 1024*1024*32
+
 //#define ETNA_BO_CACHE_PROFILE 1
 //#define ETNA_BO_CACHE_DEBUG 1
+
 #define ETNA_BO_CACHE_PAGE_SIZE 4096
 #define ETNA_BO_CACHE_BUCKETS_COUNT 4096 // all possibles buffers betweek 4k and 16M
-#define ETNA_BO_CACHE_BUCKET_SIZE(size) ((size) >> 12)
+#define ETNA_BO_CACHE_BUCKET_FROM_SIZE(size) ((size) >> 12) - 1
 
 struct etna_bo_cache_bucket {
 	uint32_t idx;
@@ -24,6 +28,7 @@ struct etna_bo_cache_bucket {
 struct etna_bo_cache {
 	struct etna_bo_cache_bucket buckets[ETNA_BO_CACHE_BUCKETS_COUNT];
 	size_t size;
+	queue_t *usermem_bos;
 };
 
 struct etna_device {
