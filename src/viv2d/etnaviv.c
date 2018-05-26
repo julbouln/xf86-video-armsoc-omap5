@@ -58,6 +58,7 @@ void etna_bo_cache_init(struct etna_device *dev) {
 
 	dev->cache = calloc(sizeof(struct etna_bo_cache), 1);
 	dev->cache->size = 0;
+	dev->cache->dirty_buckets = queue_new();
 	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
 		dev->cache->buckets[i].dirty = 0;
 		dev->cache->buckets[i].unused_bos = queue_new();
@@ -119,11 +120,15 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
 	pthread_mutex_lock(&cache_lock);
 	queue_push_tail(bucket->unused_bos, bo);
-	bucket->dirty = 1;
+	if(!bucket->dirty) {
+		queue_push_tail(cache->dirty_buckets, bucket);
+		bucket->dirty = 1;
+	}
 	pthread_mutex_unlock(&cache_lock);
 }
 
-void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
+int etna_bo_cache_clean_bucket(struct etna_device *dev, struct etna_bo_cache_bucket *bucket) {
+	struct etna_bo_cache *cache = dev->cache;
 	bucket->dirty = 0;
 	uint32_t qsize = queue_size(bucket->unused_bos);
 	for (int i = 0; i < qsize; ++i) {
@@ -139,6 +144,7 @@ void etna_bo_cache_clean_bucket(struct etna_bo_cache_bucket *bucket) {
 			bucket->dirty = 1;
 		}
 	}
+	return bucket->dirty;
 }
 
 void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_bucket *bucket) {
@@ -159,22 +165,24 @@ void etna_bo_cache_recycle_bucket(struct etna_device *dev, struct etna_bo_cache_
 void etna_bo_cache_clean(struct etna_device *dev) {
 	struct etna_bo_cache *cache = dev->cache;
 	pthread_mutex_lock(&cache_lock);
-	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
-		struct etna_bo_cache_bucket *bucket = &cache->buckets[i];
-		// clean only dirty buckets
-		if (bucket->dirty) {
+
+	uint32_t dsize = queue_size(cache->dirty_buckets);
+
+	for (int i = 0; i < dsize; i++) {
+		struct etna_bo_cache_bucket *bucket = queue_pop_head(cache->dirty_buckets);
 #ifdef ETNA_BO_CACHE_DEBUG
-			INFO_MSG("etna_bo_cache_clean: clean free_size:%d unused_size:%d", queue_size(bucket->free_bos), queue_size(bucket->unused_bos));
+		INFO_MSG("etna_bo_cache_clean: clean free_size:%d unused_size:%d", queue_size(bucket->free_bos), queue_size(bucket->unused_bos));
 #endif
-			etna_bo_cache_clean_bucket(bucket);
-//			if (queue_size(bucket->free_bos) * ETNA_BO_CACHE_PAGE_SIZE * (i+1) > ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET) {
-			if (queue_size(bucket->free_bos) > ETNA_BO_CACHE_MAX_BOS_PER_BUCKET) {
-				INFO_MSG("etna_bo_cache_clean: recycle free_size:%d bucket:%d", queue_size(bucket->free_bos), i);
-				etna_bo_cache_recycle_bucket(dev, bucket);
-			}
+		if (etna_bo_cache_clean_bucket(dev, bucket)) {
+			queue_push_tail(cache->dirty_buckets, bucket);
+		}
+		if (queue_size(bucket->free_bos) * ETNA_BO_CACHE_PAGE_SIZE * (i + 1) > ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET) {
+//				if (queue_size(bucket->free_bos) > ETNA_BO_CACHE_MAX_BOS_PER_BUCKET) {
+			INFO_MSG("etna_bo_cache_clean: recycle free_size:%d bucket:%d", queue_size(bucket->free_bos), i);
+			etna_bo_cache_recycle_bucket(dev, bucket);
 		}
 	}
-
+	
 	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
 		INFO_MSG("etna_bo_cache_clean: recycle size:%d", cache->size);
 		// clean largest buckets first

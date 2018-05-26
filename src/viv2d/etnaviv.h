@@ -27,8 +27,10 @@ struct etna_bo_cache_bucket {
 
 struct etna_bo_cache {
 	struct etna_bo_cache_bucket buckets[ETNA_BO_CACHE_BUCKETS_COUNT];
+	queue_t *dirty_buckets;
+	int dirty;
 	size_t size;
-	queue_t *usermem_bos;
+	queue_t *usermem_bos;	
 };
 
 struct etna_device {

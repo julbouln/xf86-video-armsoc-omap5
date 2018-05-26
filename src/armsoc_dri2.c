@@ -685,6 +685,59 @@ static struct armsoc_bo *boFromBuffer(DRI2BufferPtr buf)
 	return priv->bo;
 }
 
+static
+void updateResizedBuffer(ScrnInfoPtr pScrn, void *buffer,
+		struct armsoc_bo *old_bo, struct armsoc_bo *resized_bo) {
+	DRI2BufferPtr dri2buf = (DRI2BufferPtr)buffer;
+	struct ARMSOCDRI2BufferRec *buf = ARMSOCBUF(dri2buf);
+	int i;
+
+	for (i = 0; i < buf->numPixmaps; i++) {
+		if (buf->pPixmaps[i] != NULL) {
+			struct ARMSOCPixmapPrivRec *priv = exaGetPixmapDriverPrivate(buf->pPixmaps[i]);
+
+			if (old_bo == priv->bo) {
+				int ret;
+
+				/* Update the buffer name if this pixmap is current */
+				if (i == buf->currentPixmap) {
+					ret = armsoc_bo_get_name(resized_bo, &dri2buf->name);
+					assert(!ret);
+				}
+
+				/* pixmap takes ref on resized bo */
+				armsoc_bo_reference(resized_bo);
+				/* replace the old_bo with the resized_bo */
+				priv->bo = resized_bo;
+				/* pixmap drops ref on old bo */
+				armsoc_bo_unreference(old_bo);
+			}
+		}
+	}
+}
+
+void
+ARMSOCDRI2ResizeSwapChain(ScrnInfoPtr pScrn, struct armsoc_bo *old_bo,
+		struct armsoc_bo *resized_bo)
+{
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	struct ARMSOCDRISwapCmd *cmd = NULL;
+	int i;
+	int back = pARMSOC->swap_chain_count - 1; /* The last swap scheduled */
+
+	/* Update the bos for each scheduled swap in the swap chain */
+	for (i = 0; i < pARMSOC->swap_chain_size && back >= 0; i++) {
+		unsigned int idx = back % pARMSOC->swap_chain_size;
+
+		cmd = pARMSOC->swap_chain[idx];
+		back--;
+		if (!cmd)
+			continue;
+		updateResizedBuffer(pScrn, cmd->pSrcBuffer, old_bo, resized_bo);
+		updateResizedBuffer(pScrn, cmd->pDstBuffer, old_bo, resized_bo);
+	}
+}
+
 void
 ARMSOCDRI2SwapComplete(struct ARMSOCDRISwapCmd *cmd)
 {
