@@ -13,10 +13,11 @@ simplified etnaviv drm based on libdrm
 #include <unistd.h>
 #include <pthread.h>
 
+#include <xorg-server.h>
+#include <xf86.h>
+
 #include "etnaviv.h"
 #include "etnaviv_drmif.h"
-
-#include "xf86.h"
 
 #define ALIGN(v,a) (((v) + (a) - 1) & ~((a) - 1))
 

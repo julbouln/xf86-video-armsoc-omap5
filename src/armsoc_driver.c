@@ -1313,8 +1313,10 @@ ARMSOCCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	 * we do it here, before calling the CloseScreen chain which would just free pScreen->devPrivate in fbCloseScreen()
 	 */
 	if (pScreen->devPrivate) {
-		(void) (*pScreen->DestroyPixmap)(pScreen->devPrivate);
-		pScreen->devPrivate = NULL;
+		// NOT: this make X segfault 
+		// Xorg: ../../../../include/privates.h:122: dixGetPrivateAddr: Assertion `key->initialized' failed.
+//		(void) (*pScreen->DestroyPixmap)(pScreen->devPrivate);
+//		pScreen->devPrivate = NULL;
 	}
 
 	unwrap(pARMSOC, pScreen, CloseScreen);
