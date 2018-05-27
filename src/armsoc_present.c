@@ -676,12 +676,13 @@ armsoc_present_unflip(ScreenPtr screen, uint64_t event_id)
 	event->event_id = event_id;
 	event->unflip = TRUE;
 
+/*
 	if (armsoc_present_check_flip(NULL, screen->root, pixmap, TRUE) &&
 	        drmmode_page_flip(screen, pixmap, event)
 	   ) {
 		return;
 	}
-
+*/
 	for (i = 0; i < config->num_crtc; i++) {
 		xf86CrtcPtr crtc = config->crtc[i];
 		struct drmmode_crtc_private_rec * drmmode_crtc = crtc->driver_private;

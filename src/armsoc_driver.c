@@ -1375,6 +1375,12 @@ ARMSOCBlockHandler(BLOCKHANDLER_ARGS_DECL)
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 
+//	INFO_MSG("ARMSOCBlockHandler");
+
+	if (pARMSOC->pARMSOCEXA && pARMSOC->pARMSOCEXA->Flush) {
+		pARMSOC->pARMSOCEXA->Flush(pARMSOC->pARMSOCEXA);
+	}
+
 	swap(pARMSOC, pScreen, BlockHandler);
 	(*pScreen->BlockHandler) (BLOCKHANDLER_ARGS);
 	swap(pARMSOC, pScreen, BlockHandler);

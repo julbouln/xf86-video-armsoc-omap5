@@ -38,12 +38,12 @@ static inline void etna_set_state(struct etna_cmd_stream *stream, uint32_t addre
 }
 
 static inline void etna_set_state_from_bo(struct etna_cmd_stream *stream,
-        uint32_t address, struct etna_bo *bo)
+        uint32_t address, struct etna_bo *bo, int flags)
 {
 	etna_emit_load_state(stream, address >> 2, 1);
 	etna_cmd_stream_reloc(stream, &(struct etna_reloc) {
 		.bo = bo,
-		 .flags = ETNA_RELOC_READ,
+		 .flags = flags,
 		  .offset = 0,
 	});
 }
@@ -57,6 +57,38 @@ static inline void etna_set_state_multi(struct etna_cmd_stream *stream, uint32_t
 		etna_cmd_stream_emit(stream, values[i]);
 	}
 }
+
+static inline void etna_load_state(struct etna_cmd_stream *stream, uint32_t address, const uint16_t count) {
+	stream->buffer[stream->offset++] = (VIV_FE_LOAD_STATE_HEADER_OP_LOAD_STATE |
+	                              VIV_FE_LOAD_STATE_HEADER_OFFSET((address) >> 2) |
+	                              VIV_FE_LOAD_STATE_HEADER_COUNT(count));
+}
+
+static inline void etna_add_state_from_bo(struct etna_cmd_stream *stream, struct etna_bo *bo, int flags) {
+	etna_cmd_stream_reloc(stream, &(struct etna_reloc) {
+		.bo = bo,
+		 .flags = flags,
+		  .offset = 0,
+	});
+}
+
+static inline void etna_add_state(struct etna_cmd_stream *stream, uint32_t value) {
+	stream->buffer[stream->offset++] = value;
+}
+
+#define VIV2D_SRC_PIX_RES 8
+#define VIV2D_SRC_SOLID_RES 2
+#define VIV2D_SRC_EMPTY_RES 6
+#define VIV2D_SRC_1X1_RES 16
+#define VIV2D_DEST_RES 10
+#define VIV2D_BLEND_ON_RES 8
+#define VIV2D_BLEND_OFF_RES 2
+#ifdef VIV2D_FLUSH_OPS
+#define VIV2D_FLUSH_RES 2
+#else
+#define VIV2D_FLUSH_RES 0
+#endif
+#define VIV2D_RECTS_RES(cnt) cnt*2+2
 
 static inline Bool _Viv2DSetFormat(unsigned int depth, unsigned int bpp, Viv2DFormat *fmt)
 {
@@ -114,13 +146,13 @@ static inline void _Viv2DOpInit(Viv2DOp *op) {
 	op->mask = 0;
 }
 
-static inline void _Viv2DStreamWait(Viv2DPtr v2d) {
-//	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait start");
+static inline int _Viv2DStreamWait(Viv2DPtr v2d) {
+	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait start");
 	int ret = etna_pipe_wait(v2d->pipe, etna_cmd_stream_timestamp(v2d->stream), ETNAVIV_WAIT_PIPE_MS);
 	if (ret != 0) {
 		VIV2D_INFO_MSG("wait pipe failed");
 	}
-
+	return ret;
 //	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait end");
 }
 
@@ -155,8 +187,19 @@ static inline uint32_t Viv2DSrcConfig(Viv2DFormat *format) {
 }
 
 static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int srcX, int srcY, int width, int height, Viv2DFormat *format) {
+//	_Viv2DStreamReserve(v2d, 8);
+#if 1
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo, ETNA_RELOC_READ);
+	etna_load_state(v2d->stream, VIVS_DE_SRC_STRIDE, 5);
+	etna_add_state(v2d->stream, src->pitch); // VIVS_DE_SRC_STRIDE
+	etna_add_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG_ROTATION_DISABLE); // VIVS_DE_SRC_ROTATION_CONFIG
+	etna_add_state(v2d->stream, Viv2DSrcConfig(format)); // VIVS_DE_SRC_CONFIG
+	etna_add_state(v2d->stream, VIVS_DE_SRC_ORIGIN_X(srcX) | VIVS_DE_SRC_ORIGIN_Y(srcY)); // VIVS_DE_SRC_ORIGIN
+	etna_add_state(v2d->stream, VIVS_DE_SRC_SIZE_X(width) | VIVS_DE_SRC_SIZE_Y(height)); // VIVS_DE_SRC_SIZE
+#endif
+#if 0
 //	_Viv2DStreamReserve(v2d->stream, 12);
-	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo);
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo, ETNA_RELOC_READ);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, src->pitch);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(format));
@@ -167,6 +210,7 @@ static inline void _Viv2DStreamSrcWithFormat(Viv2DPtr v2d, Viv2DPixmapPrivPtr sr
 	               VIVS_DE_SRC_SIZE_X(width) |
 	               VIVS_DE_SRC_SIZE_Y(height)
 	              ); // source size is ignored
+#endif
 	VIV2D_DBG_MSG("_Viv2DStreamSrcWithFormat src:%p x:%d y:%d width:%d height:%d fmt:%s/%s",
 	              src, srcX, srcY, width, height, Viv2DFormatColorStr(format), Viv2DFormatSwizzleStr(format));
 }
@@ -176,6 +220,14 @@ static inline void _Viv2DStreamSrc(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, int src
 }
 
 static inline void _Viv2DStreamEmptySrc(Viv2DPtr v2d, int srcX, int srcY, int width, int height) {
+	etna_load_state(v2d->stream, VIVS_DE_SRC_STRIDE, 5);
+	etna_add_state(v2d->stream, 0); // VIVS_DE_SRC_STRIDE
+	etna_add_state(v2d->stream, 0); // VIVS_DE_SRC_ROTATION_CONFIG
+	etna_add_state(v2d->stream, 0); // VIVS_DE_SRC_CONFIG
+	etna_add_state(v2d->stream, VIVS_DE_SRC_ORIGIN_X(srcX) | VIVS_DE_SRC_ORIGIN_Y(srcY)); // VIVS_DE_SRC_ORIGIN
+	etna_add_state(v2d->stream, VIVS_DE_SRC_SIZE_X(width) | VIVS_DE_SRC_SIZE_Y(height)); // VIVS_DE_SRC_SIZE
+
+#if 0
 //	_Viv2DStreamReserve(v2d->stream, 10);
 //	etna_set_state(v2d->stream, VIVS_DE_SRC_ADDRESS, 0);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, 0);
@@ -188,12 +240,51 @@ static inline void _Viv2DStreamEmptySrc(Viv2DPtr v2d, int srcX, int srcY, int wi
 	               VIVS_DE_SRC_SIZE_X(width) |
 	               VIVS_DE_SRC_SIZE_Y(height)
 	              );
+#endif
 }
 
 static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd, int rop, Viv2DRect *clip) {
 //	_Viv2DStreamReserve(v2d->stream, 14);
 
-	etna_set_state_from_bo(v2d->stream, VIVS_DE_DEST_ADDRESS, dst->bo);
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_DEST_ADDRESS, dst->bo, ETNA_RELOC_WRITE);
+	etna_load_state(v2d->stream, VIVS_DE_DEST_STRIDE, 3);
+	etna_add_state(v2d->stream, dst->pitch); // VIVS_DE_DEST_STRIDE
+	etna_add_state(v2d->stream, 0); // VIVS_DE_DEST_ROTATION_CONFIG
+	etna_add_state(v2d->stream,
+	               VIVS_DE_DEST_CONFIG_FORMAT(dst->format.fmt) |
+	               VIVS_DE_DEST_CONFIG_SWIZZLE(dst->format.swizzle) |
+	               cmd |
+	               VIVS_DE_DEST_CONFIG_TILED_DISABLE |
+	               VIVS_DE_DEST_CONFIG_MINOR_TILED_DISABLE
+	              ); // VIVS_DE_DEST_CONFIG
+
+	etna_load_state(v2d->stream, VIVS_DE_ROP, 3);
+	etna_add_state(v2d->stream,
+	               VIVS_DE_ROP_ROP_FG(rop) | VIVS_DE_ROP_ROP_BG(rop) | VIVS_DE_ROP_TYPE_ROP4); // VIVS_DE_ROP
+
+	if (clip) {
+		etna_add_state(v2d->stream,
+		               VIVS_DE_CLIP_TOP_LEFT_X(clip->x1) |
+		               VIVS_DE_CLIP_TOP_LEFT_Y(clip->y1)
+		              ); // VIVS_DE_CLIP_TOP_LEFT
+		etna_add_state(v2d->stream,
+		               VIVS_DE_CLIP_BOTTOM_RIGHT_X(clip->x2) |
+		               VIVS_DE_CLIP_BOTTOM_RIGHT_Y(clip->y2)
+		              ); // VIVS_DE_CLIP_BOTTOM_RIGHT
+
+	} else {
+		etna_add_state(v2d->stream,
+		               VIVS_DE_CLIP_TOP_LEFT_X(0) |
+		               VIVS_DE_CLIP_TOP_LEFT_Y(0)
+		              ); // VIVS_DE_CLIP_TOP_LEFT
+		etna_add_state(v2d->stream,
+		               VIVS_DE_CLIP_BOTTOM_RIGHT_X(dst->width) |
+		               VIVS_DE_CLIP_BOTTOM_RIGHT_Y(dst->height)
+		              ); // VIVS_DE_CLIP_BOTTOM_RIGHT
+	}
+
+#if 0
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_DEST_ADDRESS, dst->bo, ETNA_RELOC_WRITE);
 	etna_set_state(v2d->stream, VIVS_DE_DEST_STRIDE, dst->pitch);
 	etna_set_state(v2d->stream, VIVS_DE_DEST_ROTATION_CONFIG, 0);
 	etna_set_state(v2d->stream, VIVS_DE_DEST_CONFIG,
@@ -226,8 +317,11 @@ static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd
 		               VIVS_DE_CLIP_BOTTOM_RIGHT_Y(dst->height)
 		              );
 	}
+#endif
+
 	VIV2D_DBG_MSG("_Viv2DStreamDst dst:%p fmt:%s/%s",
 	              dst, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
+
 }
 
 static inline void _Viv2DStreamStretch(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DPixmapPrivPtr dst) {
@@ -301,12 +395,20 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op,
 		               VIVS_DE_ALPHA_MODES_SRC_BLENDING_MODE(blend_op->src_blend_mode) |
 		               VIVS_DE_ALPHA_MODES_DST_BLENDING_MODE(blend_op->dst_blend_mode));
 
+		etna_load_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, 3);
+		etna_add_state(v2d->stream, src_alpha_color << 24); // VIVS_DE_GLOBAL_SRC_COLOR
+		etna_add_state(v2d->stream, dst_alpha_color << 24); // VIVS_DE_GLOBAL_DEST_COLOR
+		etna_add_state(v2d->stream, /* PE20 */
+		               premultiply); // VIVS_DE_COLOR_MULTIPLY_MODES
+
+
+#if 0
 		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_SRC_COLOR, src_alpha_color << 24);
 		etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, dst_alpha_color << 24);
 
 		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, /* PE20 */
 		               premultiply);
-
+#endif
 		VIV2D_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
 
 	} else {
@@ -327,9 +429,10 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, uint32_t color) {
 	/* Clear color PE20 */
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE32, color );
 	/* Clear color PE10 */
-	etna_set_state(v2d->stream, VIVS_DE_CLEAR_BYTE_MASK, 0xff);
+/*	etna_set_state(v2d->stream, VIVS_DE_CLEAR_BYTE_MASK, 0xff);
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_LOW, color);
 	etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_HIGH, color);
+*/
 	VIV2D_DBG_MSG("_Viv2DStreamColor color:%x", color);
 }
 
@@ -338,20 +441,6 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, uint32_t color) {
 static inline void _Viv2DStreamFlush(Viv2DPtr v2d) {
 	etna_set_state(v2d->stream, VIVS_GL_FLUSH_CACHE, VIVS_GL_FLUSH_CACHE_PE2D);
 }
-
-#define VIV2D_SRC_PIX_RES 12
-#define VIV2D_SRC_SOLID_RES 8
-#define VIV2D_SRC_EMPTY_RES 10
-#define VIV2D_SRC_1X1_RES 16
-#define VIV2D_DEST_RES 14
-#define VIV2D_BLEND_ON_RES 10
-#define VIV2D_BLEND_OFF_RES 2
-#ifdef VIV2D_FLUSH_OPS
-#define VIV2D_FLUSH_RES 2
-#else
-#define VIV2D_FLUSH_RES 0
-#endif
-#define VIV2D_RECTS_RES(cnt) cnt*2+2
 
 static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_rect, Bool blend) {
 	int reserve = 0;
@@ -396,7 +485,12 @@ static inline void _Viv2DStreamCopy(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv2DP
                                     Bool dst_global, uint8_t dst_alpha,
 
                                     int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
+#ifdef VIV2D_COPY_BLEND
 	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_ON_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
+#else
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_SRC_PIX_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_FLUSH_RES);
+#endif
+
 	_Viv2DStreamSrc(v2d, src, x, y, w, h);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, ROP_SRC, NULL);
 	_Viv2DStreamBlendOp(v2d, blend_op, src_global, src_alpha, dst_global, dst_alpha);

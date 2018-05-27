@@ -79,6 +79,7 @@ struct ARMSOCEXARec {
 	Bool (*MapUsermemBuf)(struct ARMSOCEXARec *exa, int width, int height, int pitch, void *data, struct ARMSOCEXABuf *buf);
 	void (*UnmapUsermemBuf)(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf);
 
+	void (*Flush)(struct ARMSOCEXARec *exa);
 	/**
 	 * Called by X driver's FreeScreen() function at the end of each
 	 * server lifetime to free per-ScrnInfoRec data structures, to close

@@ -120,7 +120,7 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 	struct etna_bo_cache_bucket *bucket = &cache->buckets[bucket_size];
 	pthread_mutex_lock(&cache_lock);
 	queue_push_tail(bucket->unused_bos, bo);
-	if(!bucket->dirty) {
+	if (!bucket->dirty) {
 		queue_push_tail(cache->dirty_buckets, bucket);
 		bucket->dirty = 1;
 	}
@@ -182,7 +182,7 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 			etna_bo_cache_recycle_bucket(dev, bucket);
 		}
 	}
-	
+
 	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
 		INFO_MSG("etna_bo_cache_clean: recycle size:%d", cache->size);
 		// clean largest buckets first
@@ -208,12 +208,15 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 }
 
 void etna_bo_cache_destroy(struct etna_device *dev) {
-	queue_free(dev->cache->usermem_bos);
 	for (int i = 0; i < ETNA_BO_CACHE_BUCKETS_COUNT; ++i) {
-		etna_bo_cache_recycle_bucket(dev, &dev->cache->buckets[i]);
+		struct etna_bo_cache_bucket *bucket = &dev->cache->buckets[i];
+		etna_bo_cache_clean_bucket(dev, bucket);
+		etna_bo_cache_recycle_bucket(dev, bucket);
 		queue_free(dev->cache->buckets[i].unused_bos);
 		queue_free(dev->cache->buckets[i].free_bos);
 	}
+	queue_free(dev->cache->usermem_bos);
+	queue_free(dev->cache->dirty_buckets);
 }
 
 // device
@@ -380,32 +383,33 @@ static inline void get_abs_timeout(struct drm_etnaviv_timespec *tv, uint64_t ns)
 
 int etna_pipe_wait_ns(struct etna_pipe *pipe, uint32_t timestamp, uint64_t ns)
 {
-	struct etna_device *dev = pipe->gpu->dev;
-	int ret;
+	if (pipe->nr_bos > 0) {
+		struct etna_device *dev = pipe->gpu->dev;
+		int ret;
 
-	struct drm_etnaviv_wait_fence req = {
-		.pipe = pipe->gpu->core,
-		.fence = timestamp,
-	};
+		struct drm_etnaviv_wait_fence req = {
+			.pipe = pipe->gpu->core,
+			.fence = timestamp,
+		};
 
-	if (ns == 0)
-		req.flags |= ETNA_WAIT_NONBLOCK;
+		if (ns == 0)
+			req.flags |= ETNA_WAIT_NONBLOCK;
 
-	get_abs_timeout(&req.timeout, ns);
+		get_abs_timeout(&req.timeout, ns);
 
-	ret = drmCommandWrite(dev->fd, DRM_ETNAVIV_WAIT_FENCE, &req, sizeof(req));
-	if (ret) {
-		ERROR_MSG("wait-fence failed! %d (%s)", ret, strerror(errno));
-		return ret;
+		ret = drmCommandWrite(dev->fd, DRM_ETNAVIV_WAIT_FENCE, &req, sizeof(req));
+		if (ret) {
+			ERROR_MSG("wait-fence failed! %d (%s)", ret, strerror(errno));
+			return ret;
+		}
+
+		etna_bo_cache_clean(dev);
+
+		for (int i = 0; i < pipe->nr_bos; i++) {
+			pipe->bos[i]->state = ETNA_BO_READY;
+		}
+		pipe->nr_bos = 0;
 	}
-
-	etna_bo_cache_clean(dev);
-
-	for (int i = 0; i < pipe->nr_bos; i++) {
-		pipe->bos[i]->state = ETNA_BO_READY;
-	}
-	pipe->nr_bos = 0;
-
 	return 0;
 }
 
@@ -669,6 +673,8 @@ void etna_cmd_stream_reloc(struct etna_cmd_stream *stream, const struct etna_rel
 	reloc->reloc_offset = r->offset;
 	reloc->submit_offset = stream->offset * 4; /* in bytes */
 	reloc->flags = 0;
+
+//	INFO_MSG("etna_cmd_stream_reloc bo:%p idx:%d/%d", r->bo, idx, reloc->reloc_idx);
 
 	etna_cmd_stream_emit(stream, addr);
 }

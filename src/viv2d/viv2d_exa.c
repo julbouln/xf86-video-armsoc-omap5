@@ -133,6 +133,17 @@ viv2d_pict_format[] = {
 	/*END*/
 };
 
+static void Viv2DFlush(struct ARMSOCEXARec *exa) {
+	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
+	Viv2DRec *v2d = v2d_exa->v2d;
+
+//	VIV2D_INFO_MSG("Viv2DFlush");
+	if (!_Viv2DStreamWait(v2d)) {
+		_Viv2DStreamCommit(v2d, TRUE);
+	}
+
+}
+
 static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
 	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 	Viv2DRec *v2d = v2d_exa->v2d;
@@ -391,6 +402,22 @@ static inline uint32_t idx2op(int index)
 		return DRM_ETNA_PREP_WRITE;
 	}
 }
+
+#ifdef VIV2D_FLUSH_CALLBACK
+static void Viv2DFlushCallback(CallbackListPtr *list, pointer user_data,
+                               pointer call_data)
+{
+	ScrnInfoPtr pScrn = user_data;
+	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
+
+//	VIV2D_INFO_MSG("Viv2DFlushCallback");
+//	if (!_Viv2DStreamWait(v2d)) {
+		_Viv2DStreamCommit(v2d, TRUE);
+//	}
+
+}
+#endif
 
 static int Viv2DMarkSync(ScreenPtr pScreen)
 {
@@ -1110,7 +1137,11 @@ static Bool Viv2DPrepareCopy (PixmapPtr pSrcPixmap,
 	v2d->op.mask = (uint32_t)planemask;
 	v2d->op.src = src;
 	v2d->op.dst = dst;
+#ifdef VIV2D_COPY_BLEND
 	v2d->op.blend_op = &viv2d_blend_op[PictOpSrc];
+#else
+	v2d->op.blend_op = NULL;
+#endif
 
 	VIV2D_DBG_MSG("Viv2DPrepareCopy  src:%p/%p(%dx%d)[%s/%s] dst:%p/%p(%dx%d)[%s/%s] dir:%dx%d alu:%d planemask:%x",
 	              pSrcPixmap, src, src->width, src->height, Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
@@ -1558,47 +1589,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 	_Viv2DOpInit(&v2d->op);
 
-	if (pSrcPicture != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite srcPicture:%s/%s",
-		              Viv2DFormatColorStr(&src_fmt), Viv2DFormatSwizzleStr(&src_fmt));
-	}
-
-	if (src != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d) depth:%d bpp:%d",
-		              pSrc, src, src->width, src->height, pSrc->drawable.depth, pSrc->drawable.bitsPerPixel);
-	}
-
-	if (pMaskPicture != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite maskPicture:%s/%s",
-		              Viv2DFormatColorStr(&msk_fmt), Viv2DFormatSwizzleStr(&msk_fmt));
-	}
-
-	if (msk != NULL) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p/%p(%dx%d)",
-		              pMask, msk, msk->width, msk->height);
-	}
-
-	VIV2D_DBG_MSG("Viv2DPrepareComposite dst:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pDst,
-	              dst, dst->width, dst->height,
-	              Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
-	              rop, pix_op_name(rop));
-
-	if (msk) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pMask,
-		              msk, msk->width, msk->height,
-		              Viv2DFormatColorStr(&msk->format), Viv2DFormatSwizzleStr(&msk->format),
-		              rop, pix_op_name(rop));
-
-	}
-
-	if (src) {
-		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pSrc,
-		              src, src->width, src->height,
-		              Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
-		              rop, pix_op_name(rop));
-
-	}
-
 	v2d->op.blend_op = &viv2d_blend_op[rop];
 
 	if (pMaskPicture != NULL) {
@@ -1630,9 +1620,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		v2d->op.fg = Viv2DColour(pSrcPicture->pSourcePict->solidFill.color, src_fmt.depth);
 	}
 
-	if (v2d->op.src_type == viv2d_src_solid)
-		VIV2D_DBG_MSG("Viv2DPrepareComposite solid src fg:%08x", v2d->op.fg);
-
 	if (pMaskPicture != NULL) {
 		// msk type
 		v2d->op.msk_type = viv2d_src_pix;
@@ -1651,9 +1638,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 			v2d->op.msk_type = viv2d_src_solid;
 			v2d->op.mask = Viv2DColour(pMaskPicture->pSourcePict->solidFill.color, msk_fmt.depth);
 		}
-		if (v2d->op.msk_type == viv2d_src_solid)
-			VIV2D_DBG_MSG("Viv2DPrepareComposite solid msk %08x", v2d->op.mask);
-
 	}
 
 	if (src != NULL)
@@ -1671,6 +1655,67 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 
 		// VIV2D_INFO_MSG("set src global alpha %d has_mask:%d", v2d->op.src_alpha, v2d->op.has_mask);
 	}
+
+#ifdef VIV2D_DEBUG
+
+	if (pSrcPicture != NULL) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite srcPicture:%s/%s",
+		              Viv2DFormatColorStr(&src_fmt), Viv2DFormatSwizzleStr(&src_fmt));
+	}
+
+	if (src != NULL) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d) depth:%d bpp:%d",
+		              pSrc, src, src->width, src->height, pSrc->drawable.depth, pSrc->drawable.bitsPerPixel);
+	}
+
+	if (pMaskPicture != NULL) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite maskPicture:%s/%s",
+		              Viv2DFormatColorStr(&msk_fmt), Viv2DFormatSwizzleStr(&msk_fmt));
+	}
+
+	if (msk != NULL) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p/%p(%dx%d)",
+		              pMask, msk, msk->width, msk->height);
+	}
+
+	if (v2d->op.src_type == viv2d_src_solid) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite solid src fg:%08x", v2d->op.fg);
+	}
+
+	if (v2d->op.msk_type == viv2d_src_solid) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite solid msk %08x", v2d->op.mask);
+	}
+
+	VIV2D_DBG_MSG("Viv2DPrepareComposite dst:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pDst,
+	              dst, dst->width, dst->height,
+	              Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format),
+	              rop, pix_op_name(rop));
+
+	if (msk) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite msk:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pMask,
+		              msk, msk->width, msk->height,
+		              Viv2DFormatColorStr(&msk->format), Viv2DFormatSwizzleStr(&msk->format),
+		              rop, pix_op_name(rop));
+
+	} else {
+		if (pMaskPicture != NULL) {
+			VIV2D_DBG_MSG("Viv2DPrepareComposite solid msk %d %x[%s/%s] op:%d(%s)", v2d->op.msk_type, v2d->op.mask,
+			              Viv2DFormatColorStr(&msk_fmt), Viv2DFormatSwizzleStr(&msk_fmt),
+			              rop, pix_op_name(rop));
+		}
+	}
+
+	if (src) {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite src:%p/%p(%dx%d)[%s/%s] op:%d(%s)", pSrc,
+		              src, src->width, src->height,
+		              Viv2DFormatColorStr(&src->format), Viv2DFormatSwizzleStr(&src->format),
+		              rop, pix_op_name(rop));
+	} else {
+		VIV2D_DBG_MSG("Viv2DPrepareComposite solid src %d %x[%s/%s] op:%d(%s)", v2d->op.src_type, v2d->op.fg,
+		              Viv2DFormatColorStr(&src_fmt), Viv2DFormatSwizzleStr(&src_fmt),
+		              rop, pix_op_name(rop));
+	}
+#endif
 
 	return TRUE;
 }
@@ -1837,6 +1882,10 @@ CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
 	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
+
+#ifdef VIV2D_FLUSH_CALLBACK
+	DeleteCallback(&FlushCallback, Viv2DFlushCallback, pScrn);
+#endif
 
 	_Viv2DStreamCommit(v2d, FALSE);
 
@@ -2020,7 +2069,7 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	                     xv_filter_kernel);
 
 	// 8
-	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo);
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, src->bo, ETNA_RELOC_READ);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, src->pitch);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(&src->format));
@@ -2030,9 +2079,9 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 		Viv2DPixmapPrivPtr upix = Viv2DPixmapPrivFromPixmap(extraPix[0]);
 		Viv2DPixmapPrivPtr vpix = Viv2DPixmapPrivFromPixmap(extraPix[1]);
 
-		etna_set_state_from_bo(v2d->stream, VIVS_DE_UPLANE_ADDRESS, upix->bo);
+		etna_set_state_from_bo(v2d->stream, VIVS_DE_UPLANE_ADDRESS, upix->bo, ETNA_RELOC_READ);
 		etna_set_state(v2d->stream, VIVS_DE_UPLANE_STRIDE, upix->pitch);
-		etna_set_state_from_bo(v2d->stream, VIVS_DE_VPLANE_ADDRESS, vpix->bo);
+		etna_set_state_from_bo(v2d->stream, VIVS_DE_VPLANE_ADDRESS, vpix->bo, ETNA_RELOC_READ);
 		etna_set_state(v2d->stream, VIVS_DE_VPLANE_STRIDE, vpix->pitch);
 	}
 
@@ -2072,7 +2121,7 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	etna_set_state(v2d->stream, VIVS_DE_VR_CONFIG, VIVS_DE_VR_CONFIG_START_HORIZONTAL_BLIT);
 
 	// 8
-	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, tmp->bo);
+	etna_set_state_from_bo(v2d->stream, VIVS_DE_SRC_ADDRESS, tmp->bo, ETNA_RELOC_READ);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_STRIDE, tmp->pitch);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_ROTATION_CONFIG, 0);
 	etna_set_state(v2d->stream, VIVS_DE_SRC_CONFIG, Viv2DSrcConfig(&tmp->format));
@@ -2129,18 +2178,6 @@ static Bool Viv2DPutTextureImage(PixmapPtr pSrcPix, BoxPtr pSrcBox,
 	return TRUE;
 }
 #endif
-
-static void Viv2DFlushCallback(CallbackListPtr *list, pointer user_data,
-                               pointer call_data)
-{
-	ScrnInfoPtr pScrn = user_data;
-	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
-	Viv2DRec *v2d = Viv2DPrivFromARMSOC(pARMSOC);
-
-//	VIV2D_INFO_MSG("flush callback");
-	_Viv2DStreamWait(v2d);
-	_Viv2DStreamCommit(v2d, TRUE);
-}
 
 struct ARMSOCEXARec *
 InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
@@ -2204,10 +2241,12 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 
 	v2d_exa->exa = exa;
 
+#ifdef VIV2D_FLUSH_CALLBACK
 	if (!AddCallback(&FlushCallback, Viv2DFlushCallback, pScrn)) {
 		VIV2D_ERR_MSG("cannot add flush callback");
 		goto fail;
 	}
+#endif
 
 	exa->exa_major = EXA_VERSION_MAJOR;
 	exa->exa_minor = EXA_VERSION_MINOR;
@@ -2292,6 +2331,7 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 
 	etnaviv_init_filter_kernel();
 
+	armsoc_exa->Flush = Viv2DFlush;
 	armsoc_exa->AllocBuf = Viv2DAllocBuf;
 	armsoc_exa->FreeBuf = Viv2DFreeBuf;
 	armsoc_exa->MapUsermemBuf = Viv2DMapUsermemBuf;

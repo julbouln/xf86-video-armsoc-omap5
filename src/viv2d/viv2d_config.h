@@ -1,5 +1,5 @@
 // Global
-#define VIV2D_STREAM_SIZE 1024*32
+#define VIV2D_STREAM_SIZE 1024*8
 #define VIV2D_MAX_RECTS 256
 #define VIV2D_PITCH_ALIGN 32
 
@@ -28,6 +28,8 @@
 //#define VIV2D_UPLOAD_TO_SCREEN 1
 //#define VIV2D_DOWNLOAD_FROM_SCREEN 1
 //#define VIV2D_USERPTR 1
+//#define VIV2D_COPY_BLEND 1
+//#define VIV2D_FLUSH_CALLBACK 1
 #define VIV2D_FLUSH_OPS 1
 
 // CPU only for surface < VIV2D_MIN_SIZE
