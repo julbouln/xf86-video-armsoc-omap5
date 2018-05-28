@@ -135,6 +135,7 @@ static inline void _Viv2DOpAddRect(Viv2DOp *op, int x, int y, int width, int hei
 
 static inline void _Viv2DOpInit(Viv2DOp *op) {
 	op->has_mask = FALSE;
+	op->has_component_alpha = FALSE;
 	op->blend_op = NULL;
 	op->prev_src_x = -1;
 	op->prev_src_y = -1;
@@ -245,7 +246,7 @@ static inline void _Viv2DStreamEmptySrc(Viv2DPtr v2d, int srcX, int srcY, int wi
 
 static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd, int rop, Viv2DRect *clip) {
 //	_Viv2DStreamReserve(v2d->stream, 14);
-
+#if 1
 	etna_set_state_from_bo(v2d->stream, VIVS_DE_DEST_ADDRESS, dst->bo, ETNA_RELOC_WRITE);
 	etna_load_state(v2d->stream, VIVS_DE_DEST_STRIDE, 3);
 	etna_add_state(v2d->stream, dst->pitch); // VIVS_DE_DEST_STRIDE
@@ -282,7 +283,7 @@ static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd
 		               VIVS_DE_CLIP_BOTTOM_RIGHT_Y(dst->height)
 		              ); // VIVS_DE_CLIP_BOTTOM_RIGHT
 	}
-
+#endif
 #if 0
 	etna_set_state_from_bo(v2d->stream, VIVS_DE_DEST_ADDRESS, dst->bo, ETNA_RELOC_WRITE);
 	etna_set_state(v2d->stream, VIVS_DE_DEST_STRIDE, dst->pitch);

@@ -105,7 +105,10 @@ enum viv2d_src_type {
 
 typedef struct _Viv2DOp {
 	Viv2DBlendOp *blend_op;
+
 	Bool has_mask;
+	Bool has_component_alpha;
+	
 	int src_type;
 	int msk_type;
 

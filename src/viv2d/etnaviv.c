@@ -48,6 +48,8 @@ static uint64_t prof_recycle;
 static uint64_t prof_reuse;
 #endif
 
+void etna_bo_cache_clean(struct etna_device *dev);
+
 void etna_bo_cache_init(struct etna_device *dev) {
 #ifdef ETNA_BO_CACHE_PROFILE
 	prof_bucket = 0;
@@ -82,6 +84,10 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 #ifdef ETNA_BO_CACHE_PROFILE
 	prof_alloc++;
 #endif
+
+	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
+		etna_bo_cache_clean(dev);
+	}
 
 	pthread_mutex_lock(&cache_lock);
 
@@ -184,11 +190,11 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 		}
 	}
 
-	if (cache->size > ETNA_BO_CACHE_MAX_SIZE) {
+	if (cache->size > ETNA_BO_CACHE_SIZE) {
 		INFO_MSG("etna_bo_cache_clean: recycle size:%d", cache->size);
 		// clean largest buckets first
 		for (int i = ETNA_BO_CACHE_BUCKETS_COUNT - 1; i >= 0; --i) {
-			if (cache->size > ETNA_BO_CACHE_MAX_SIZE / 2) {
+			if (cache->size > ETNA_BO_CACHE_GC_SIZE) {
 				etna_bo_cache_recycle_bucket(dev, &cache->buckets[i]);
 			} else {
 				break;
