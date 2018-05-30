@@ -188,6 +188,7 @@ void etna_cmd_stream_reloc(struct etna_cmd_stream *stream, const struct etna_rel
 // cache
 struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size);
 void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo);
+void etna_bo_cache_clean(struct etna_device *dev);
 void etna_bo_cache_usermem_del(struct etna_device *dev, struct etna_bo *bo);
 // extra
 

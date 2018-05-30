@@ -7,13 +7,14 @@
 
 #define ETNA_PIPE_BOS_SIZE 1024*4 // max pipe bos
 
-#define ETNA_BO_CACHE_SIZE 1024*1024*512 // 256 Mbytes
-#define ETNA_BO_CACHE_MAX_SIZE 1024*1024*512
-#define ETNA_BO_CACHE_GC_SIZE 1024*1024*64
-#define ETNA_BO_CACHE_MAX_BOS_PER_BUCKET 2048
-#define ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET 1024*1024*256
+#define ETNA_BO_CACHE_SIZE 1024*1024*256 // 256 Mbytes
+#define ETNA_BO_CACHE_MAX_SIZE 1024*1024*256
+#define ETNA_BO_CACHE_GC_SIZE 1024*1024*128
+#define ETNA_BO_CACHE_MAX_BOS_PER_BUCKET 1024*4
+#define ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET 1024*1024*128
 
 //#define ETNA_BO_CACHE_PROFILE 1
+//#define ETNA_DEBUG 1
 //#define ETNA_BO_CACHE_DEBUG 1
 
 #define ETNA_BO_CACHE_PAGE_SIZE 4096
@@ -52,6 +53,7 @@ struct etna_bo {
 	struct etna_cmd_stream *current_stream;
 	uint32_t idx;
 	uint32_t state;
+	uint32_t relcnt;
 };
 
 struct etna_gpu {
