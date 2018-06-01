@@ -247,7 +247,6 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		pPixmap->devKind = devKind;
 	}
 
-
 #ifndef ARMSOC_EXA_MAP_USERPTR
 	/*
 	 * Someone is messing with the memory allocation. Let's step out of
@@ -255,7 +254,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 	 */
 	if (pPixData && pPixData != priv->buf.buf) {
 #ifdef ARMSOC_EXA_DEBUG
-			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+		INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
 #endif
 		if (priv->buf.buf) {
 			pARMSOC->pARMSOCEXA->FreeBuf(pARMSOC->pARMSOCEXA, &priv->buf);
@@ -300,7 +299,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 #ifdef ARMSOC_EXA_MAP_USERPTR
 	if (pPixData) {
 #ifdef ARMSOC_EXA_DEBUG
-			INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
+		INFO_MSG("ModifyExaPixmapHeader %p pPixData(%p) != priv->buf.buf(%p) %dx%d %d %d/%d", pPixmap, pPixData, priv->buf.buf, width, height, devKind, bitsPerPixel, depth);
 #endif
 		if (pPixData != priv->buf.buf || priv->buf.size != size) {
 			if (priv->buf.buf && pARMSOC->pARMSOCEXA->UnmapUsermemBuf) {
@@ -337,6 +336,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 			ERROR_MSG("failed to allocate %d bytes mem",
 			          size);
 			priv->buf.size = 0;
+			priv->buf.pitch = 0;
 			return FALSE;
 		}
 

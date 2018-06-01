@@ -22,6 +22,14 @@
 #define VIV2D_DBG_MSG(fmt, ...)
 #endif
 
+#ifdef VIV2D_OP_DEBUG
+#define VIV2D_OP_DBG_MSG(fmt, ...)		\
+		do { xf86Msg(X_INFO, fmt "\n",\
+				##__VA_ARGS__); } while (0)
+#else
+#define VIV2D_OP_DBG_MSG(fmt, ...)
+#endif
+
 #ifdef VIV2D_UNSUPPORTED
 #define VIV2D_UNSUPPORTED_MSG(fmt, ...) \
 		do { xf86Msg(X_WARNING, fmt "\n",\

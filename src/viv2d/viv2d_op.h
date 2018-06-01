@@ -180,7 +180,7 @@ static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 static inline void _Viv2DStreamReserve(Viv2DPtr v2d, size_t n)
 {
 	if (etna_cmd_stream_avail(v2d->stream) < n) {
-		VIV2D_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
+		VIV2D_OP_DBG_MSG("_Viv2DStreamReserve %d < %d (%d)", etna_cmd_stream_avail(v2d->stream), n, v2d->stream->offset);
 		etna_cmd_stream_flush(v2d->stream);
 	}
 }
@@ -328,7 +328,7 @@ static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd
 	}
 #endif
 
-	VIV2D_DBG_MSG("_Viv2DStreamDst dst:%p fmt:%s/%s",
+	VIV2D_OP_DBG_MSG("_Viv2DStreamDst dst:%p fmt:%s/%s",
 	              dst, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
 
 }
@@ -358,7 +358,7 @@ static inline void _Viv2DStreamStretch(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv
 	               VIVS_DE_STRETCH_FACTOR_LOW_X(((src->width) << 16) / (dst->width)));
 	etna_set_state(v2d->stream, VIVS_DE_STRETCH_FACTOR_HIGH,
 	               VIVS_DE_STRETCH_FACTOR_HIGH_Y(((src->height) << 16) / (dst->height)));
-	VIV2D_DBG_MSG("_Viv2DStreamStretch %dx%d / %dx%d", src->width, src->height, dst->width, dst->height);
+	VIV2D_OP_DBG_MSG("_Viv2DStreamStretch %dx%d / %dx%d", src->width, src->height, dst->width, dst->height);
 
 }
 
@@ -384,7 +384,7 @@ static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rec
 
 	}
 
-	VIV2D_DBG_MSG("_Viv2DStreamRects %d", cur_rect);
+	VIV2D_OP_DBG_MSG("_Viv2DStreamRects %d", cur_rect);
 }
 
 static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op,
@@ -436,7 +436,7 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op,
 		etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, /* PE20 */
 		               premultiply);
 #endif
-		VIV2D_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
+		VIV2D_OP_DBG_MSG("_Viv2DStreamBlendOp op:%s", pix_op_name(blend_op->op));
 
 	} else {
 //		_Viv2DStreamReserve(v2d->stream, 10);
@@ -447,7 +447,7 @@ static inline void _Viv2DStreamBlendOp(Viv2DPtr v2d, Viv2DBlendOp *blend_op,
 				etna_set_state(v2d->stream, VIVS_DE_GLOBAL_DEST_COLOR, 0);
 				etna_set_state(v2d->stream, VIVS_DE_COLOR_MULTIPLY_MODES, 0);
 				*/
-		VIV2D_DBG_MSG("_Viv2DStreamBlendOp disabled");
+		VIV2D_OP_DBG_MSG("_Viv2DStreamBlendOp disabled");
 	}
 }
 
@@ -460,7 +460,7 @@ static inline void _Viv2DStreamColor(Viv2DPtr v2d, uint32_t color) {
 		etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_LOW, color);
 		etna_set_state(v2d->stream, VIVS_DE_CLEAR_PIXEL_VALUE_HIGH, color);
 	*/
-	VIV2D_DBG_MSG("_Viv2DStreamColor color:%x", color);
+	VIV2D_OP_DBG_MSG("_Viv2DStreamColor color:%x", color);
 }
 
 // higher level helpers
@@ -596,7 +596,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
 	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
 
-	VIV2D_DBG_MSG("_Viv2DOpCreateTmpPix bo:%p %dx%d %d", tmp->bo, width, height, pitch * height);
+	VIV2D_OP_DBG_MSG("_Viv2DOpCreateTmpPix bo:%p %dx%d %d", tmp->bo, width, height, pitch * height);
 	tmp->width = width;
 	tmp->height = height;
 	tmp->pitch = pitch;
@@ -630,7 +630,7 @@ void _Viv2DPixTrace(Viv2DPixmapPrivPtr pix, const char *tag) {
 
 	snprintf(tmpBuf, len, "/home/julbouln/traces/%020llu_%s_%08x.png", milliseconds, tag, pix);
 
-	VIV2D_DBG_MSG("_Viv2DPixTrace time:%020llu tag:%s pix:%p bo:%p", milliseconds, tag, pix, pix->bo);
+	VIV2D_OP_DBG_MSG("_Viv2DPixTrace time:%020llu tag:%s pix:%p bo:%p", milliseconds, tag, pix, pix->bo);
 
 	_Viv2DPixToBmp(pix, tmpBuf);
 	free(tmpBuf);

@@ -43,6 +43,7 @@
 
 #include "etnaviv_drmif.h"
 #include "etnaviv_drm.h"
+#include "etnaviv_extra.h"
 
 #include "exa.h"
 
@@ -480,7 +481,7 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 				_Viv2DStreamCommit(v2d, TRUE);
 				_Viv2DStreamWait(v2d);
 			}
-			etna_bo_cpu_prep(pix->bo, idx2op(index), 5000000000);
+			etna_bo_cpu_prep(pix->bo, idx2op(index));
 #ifdef VIV2D_TRACE
 			_Viv2DPixTrace(pix, "prep");
 #endif
@@ -815,6 +816,8 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	_Viv2DOpDelTmpPix(v2d, tmp);
 #endif
 
+	exaMarkSync(pDst->drawable.pScreen);
+
 	return TRUE;
 }
 #endif
@@ -898,7 +901,7 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	_Viv2DStreamCommit(v2d, TRUE);
 	_Viv2DStreamWait(v2d);
 
-	etna_bo_cpu_prep(tmp->bo, DRM_ETNA_PREP_READ, 5000000000);
+	etna_bo_cpu_prep(tmp->bo, DRM_ETNA_PREP_READ);
 
 	dst_buf = dst;
 	src_buf = (char *) etna_bo_map(tmp->bo);
@@ -1077,7 +1080,7 @@ static void Viv2DDoneSolid (PixmapPtr pPixmap) {
 
 #ifdef VIV2D_TRACE
 	_Viv2DStreamCommit(v2d, TRUE);
-	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ, 5000000000);
+	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ);
 	_Viv2DPixTrace(v2d->op.dst, "soli");
 	etna_bo_cpu_fini(v2d->op.dst->bo);
 #endif
@@ -1275,7 +1278,7 @@ static void Viv2DDoneCopy (PixmapPtr pDstPixmap) {
 
 #ifdef VIV2D_TRACE
 	_Viv2DStreamCommit(v2d, TRUE);
-	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ, 5000000000);
+	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ);
 	_Viv2DPixTrace(v2d->op.dst, "copy");
 	etna_bo_cpu_fini(v2d->op.dst->bo);
 #endif
@@ -1967,7 +1970,7 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 
 #ifdef VIV2D_TRACE
 	_Viv2DStreamCommit(v2d, TRUE);
-	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ, 5000000000);
+	etna_bo_cpu_prep(v2d->op.dst->bo, DRM_ETNA_PREP_READ);
 	_Viv2DPixTrace(v2d->op.dst, "comp");
 	etna_bo_cpu_fini(v2d->op.dst->bo);
 #endif
@@ -2008,6 +2011,7 @@ CloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	etna_cmd_stream_del(v2d->stream);
 	etna_pipe_del(v2d->pipe);
 	etna_gpu_del(v2d->gpu);
+	etna_bo_cache_destroy(v2d->dev);
 	etna_device_del(v2d->dev);
 	close(v2d->fd);
 
@@ -2320,6 +2324,8 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		ERROR_MSG("Viv2DEXA: Failed to load device");
 		goto fail;
 	}
+
+	etna_bo_cache_init(v2d->dev);
 
 	v2d->gpu = etna_gpu_new(v2d->dev, 0);
 	if (!v2d->gpu) {
