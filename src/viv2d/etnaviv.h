@@ -2,39 +2,9 @@
 
 #include "etnaviv_drmif.h"
 #include "etnaviv_drm.h"
-
-#include "queue.h"
+#include "etnaviv_extra.h"
 
 #define ETNA_PIPE_BOS_SIZE 1024*4 // max pipe bos
-
-#define ETNA_BO_CACHE_SIZE 1024*1024*256 // 256 Mbytes
-#define ETNA_BO_CACHE_MAX_SIZE 1024*1024*256
-#define ETNA_BO_CACHE_GC_SIZE 1024*1024*128
-#define ETNA_BO_CACHE_MAX_BOS_PER_BUCKET 1024*4
-#define ETNA_BO_CACHE_MAX_SIZE_PER_BUCKET 1024*1024*128
-
-//#define ETNA_BO_CACHE_PROFILE 1
-//#define ETNA_DEBUG 1
-//#define ETNA_BO_CACHE_DEBUG 1
-
-#define ETNA_BO_CACHE_PAGE_SIZE 4096
-#define ETNA_BO_CACHE_BUCKETS_COUNT 4096 // all possibles buffers betweek 4k and 16M
-#define ETNA_BO_CACHE_BUCKET_FROM_SIZE(size) ((size) >> 12) - 1
-
-struct etna_bo_cache_bucket {
-	uint32_t idx;
-	int dirty;
-	queue_t *unused_bos;
-	queue_t *free_bos;
-};
-
-struct etna_bo_cache {
-	struct etna_bo_cache_bucket buckets[ETNA_BO_CACHE_BUCKETS_COUNT];
-	queue_t *dirty_buckets;
-	int dirty;
-	size_t size;
-	queue_t *usermem_bos;	
-};
 
 struct etna_device {
 	int fd;
@@ -93,3 +63,5 @@ struct etna_cmd_stream_priv {
 
 };
 
+struct etna_bo *bo_from_handle(struct etna_device *dev,
+                                      uint32_t size, uint32_t handle, uint32_t flags);
