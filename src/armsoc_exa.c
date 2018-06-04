@@ -97,7 +97,7 @@ ARMSOCPixmapExchange(PixmapPtr a, PixmapPtr b)
 
 static void *
 CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
-                int depth, int bitsPerPixel,
+                int depth, int usage_hint, int bitsPerPixel,
                 int *new_fb_pitch)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
@@ -107,7 +107,7 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 #ifdef ARMSOC_EXA_DEBUG
 		INFO_MSG("CreateExaPixmap %dx%d %d %d", width, height, depth, bitsPerPixel);
 #endif
-		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, depth, bitsPerPixel, &priv->buf);
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, width, height, depth, bitsPerPixel, usage_hint, &priv->buf);
 
 		if (!priv->buf.buf) {
 			ERROR_MSG("failed to allocate %dx%d mem", width, height);
@@ -122,7 +122,7 @@ CreateExaPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, 
 
 static void *
 CreateDumbPixmap(struct ARMSOCPixmapPrivRec *priv, ScreenPtr pScreen, int width, int height,
-                 int depth, int bitsPerPixel,
+                 int depth, int usage_hint, int bitsPerPixel,
                  int *new_fb_pitch)
 {
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
@@ -195,9 +195,9 @@ ARMSOCCreatePixmap2(ScreenPtr pScreen, int width, int height,
 #endif
 
 	if (IsDumbPixmap(priv, width * height * (bitsPerPixel / 8)))
-		return CreateDumbPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+		return CreateDumbPixmap(priv, pScreen, width, height, depth, usage_hint, bitsPerPixel, new_fb_pitch);
 	else
-		return CreateExaPixmap(priv, pScreen, width, height, depth, bitsPerPixel, new_fb_pitch);
+		return CreateExaPixmap(priv, pScreen, width, height, depth, usage_hint, bitsPerPixel, new_fb_pitch);
 }
 
 _X_EXPORT void
@@ -329,7 +329,7 @@ ModifyExaPixmapHeader(struct ARMSOCPixmapPrivRec *priv, PixmapPtr pPixmap, int w
 		}
 
 //		INFO_MSG("AllocBuf modify %p",&priv->buf);
-		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.depth, pPixmap->drawable.bitsPerPixel, &priv->buf);
+		pARMSOC->pARMSOCEXA->AllocBuf(pARMSOC->pARMSOCEXA, pPixmap->drawable.width, pPixmap->drawable.height, pPixmap->drawable.depth, pPixmap->drawable.bitsPerPixel, 0, &priv->buf);
 
 		if (!priv->buf.buf) {
 			INFO_MSG("ModifyExaPixmapHeader failed to allocate buffer");

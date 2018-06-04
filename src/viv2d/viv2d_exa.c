@@ -144,7 +144,7 @@ static void Viv2DFlush(struct ARMSOCEXARec *exa) {
 
 }
 
-static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
+static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, int usage_hint, struct ARMSOCEXABuf *buf) {
 	Viv2DEXAPtr v2d_exa = (Viv2DEXAPtr)(exa);
 	Viv2DRec *v2d = v2d_exa->v2d;
 
@@ -155,10 +155,10 @@ static void Viv2DAllocBuf(struct ARMSOCEXARec *exa, int width, int height, int d
 	Viv2DFormat fmt;
 
 	// do not create etna bo if too small or unsupported format
-	if (size > VIV2D_MIN_SIZE && size < VIV2D_MAX_SIZE && _Viv2DSetFormat(depth, bpp, &fmt)) {
+	if (size > VIV2D_MIN_SIZE && size < VIV2D_MAX_SIZE) { // && _Viv2DSetFormat(depth, bpp, &fmt)) {
 		struct etna_bo *bo;
 		//	VIV2D_INFO_MSG("Viv2DAllocBuf size:%d pitch:%d", pitch * height, pitch);
-		bo = etna_bo_cache_new(v2d->dev, size);
+		bo = etna_bo_cache_new(v2d->dev, size, ETNA_BO_WC);
 		buf->priv = (void *)bo;
 		buf->buf = etna_bo_map(bo);
 	} else {
@@ -304,6 +304,7 @@ static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
 	Viv2DAttachBo(pARMSOC, armsocPix);
 }
 
+
 // from libyuv
 static inline void ARGBExtractAlphaRow_NEON(const uint8_t* src_argb,
         uint8_t* dst_a,
@@ -407,6 +408,25 @@ static inline uint32_t idx2op(int index)
 	}
 }
 
+
+static PixmapPtr
+GetDrawablePixmap(DrawablePtr pDrawable) {
+	/* Make sure there is a drawable. */
+	if (NULL == pDrawable) {
+		return NULL;
+	}
+
+	/* Check for a backing pixmap. */
+	if (DRAWABLE_WINDOW == pDrawable->type) {
+
+		WindowPtr pWindow = (WindowPtr) pDrawable;
+		return pDrawable->pScreen->GetWindowPixmap(pWindow);
+	}
+
+	/* Otherwise, it's a regular pixmap. */
+	return (PixmapPtr) pDrawable;
+}
+
 #ifdef VIV2D_FLUSH_CALLBACK
 static void Viv2DFlushCallback(CallbackListPtr *list, pointer user_data,
                                pointer call_data)
@@ -481,7 +501,9 @@ Viv2DPrepareAccess(PixmapPtr pPixmap, int index) {
 				_Viv2DStreamCommit(v2d, TRUE);
 				_Viv2DStreamWait(v2d);
 			}
+
 			etna_bo_cpu_prep(pix->bo, idx2op(index));
+
 #ifdef VIV2D_TRACE
 			_Viv2DPixTrace(pix, "prep");
 #endif
@@ -515,9 +537,74 @@ Viv2DFinishAccess(PixmapPtr pPixmap, int index)
 			etna_bo_cpu_fini(pix->bo);
 			VIV2D_DBG_MSG("Viv2DFinishAccess pix:%p/%p(%dx%d) bo:%p index:%d refcnt:(%d)", pPixmap, pix, pix->width, pix->height, pix->bo, index, pix->refcnt);
 		}
+
 		pix->refcnt = 0;
 	}
 }
+
+#ifdef VIV2D_EXA_HACK
+#include "fb.h"
+#include "fbpict.h"
+
+// Trapezoids hack
+void Viv2DTrapezoids(CARD8 op, PicturePtr pSrcPicture, PicturePtr pDstPicture,
+                     PictFormatPtr maskFormat, INT16 xSrc, INT16 ySrc, int ntrap,
+                     xTrapezoid * traps)
+{
+	PixmapPtr pSrc = GetDrawablePixmap(pSrcPicture->pDrawable);
+	PixmapPtr pDst = GetDrawablePixmap(pDstPicture->pDrawable);
+
+	if (pSrc)
+		Viv2DPrepareAccess(pSrc, EXA_PREPARE_SRC);
+	if (pDst)
+		Viv2DPrepareAccess(pDst, EXA_PREPARE_DEST);
+	fbTrapezoids(op, pSrcPicture, pDstPicture, maskFormat, xSrc, ySrc, ntrap, traps);
+	if (pDst)
+		Viv2DFinishAccess(pDst, EXA_PREPARE_DEST);
+	if (pSrc)
+		Viv2DFinishAccess(pSrc, EXA_PREPARE_SRC);
+}
+
+
+void Viv2DAddTraps(PicturePtr pPicture, INT16 x_off, INT16 y_off,
+                   int ntrap, xTrap *traps)
+{
+	PixmapPtr pPix = GetDrawablePixmap(pPicture->pDrawable);
+
+	Viv2DPrepareAccess(pPix, EXA_PREPARE_DEST);
+	fbAddTraps(pPicture, x_off, y_off, ntrap, traps);
+	Viv2DFinishAccess(pPix, EXA_PREPARE_DEST);
+}
+
+void Viv2DTriangles(CARD8 op, PicturePtr pSrcPicture, PicturePtr pDstPicture,
+                    PictFormatPtr maskFormat, INT16 xSrc, INT16 ySrc, int ntri, xTriangle *tri)
+{
+	PixmapPtr pSrc = GetDrawablePixmap(pSrcPicture->pDrawable);
+	PixmapPtr pDst = GetDrawablePixmap(pDstPicture->pDrawable);
+
+	if (pSrc)
+		Viv2DPrepareAccess(pSrc, EXA_PREPARE_SRC);
+	if (pDst)
+		Viv2DPrepareAccess(pDst, EXA_PREPARE_DEST);
+
+	fbTriangles(op, pSrcPicture, pDstPicture, maskFormat, xSrc, ySrc, ntri, tri);
+	if (pDst)
+		Viv2DFinishAccess(pDst, EXA_PREPARE_DEST);
+	if (pSrc)
+		Viv2DFinishAccess(pSrc, EXA_PREPARE_SRC);
+}
+
+
+void Viv2DAddTriangles(PicturePtr pPicture, INT16 x_off, INT16 y_off,
+    int ntri, xTriangle *tris)
+{
+	PixmapPtr pPix = GetDrawablePixmap(pPicture->pDrawable);
+
+	Viv2DPrepareAccess(pPix, EXA_PREPARE_DEST);
+    fbAddTriangles(pPicture, x_off, y_off, ntri, tris);
+	Viv2DFinishAccess(pPix, EXA_PREPARE_DEST);
+}
+#endif
 
 /**
  * PixmapIsOffscreen() is an optional driver replacement to
@@ -555,14 +642,15 @@ Viv2DCreatePixmap2 (ScreenPtr pScreen, int width, int height,
 {
 	struct ARMSOCPixmapPrivRec *armsocPix = ARMSOCCreatePixmap2(pScreen, width, height, depth,
 	                                        usage_hint, bitsPerPixel, new_fb_pitch);
-	Viv2DPixmapPrivPtr pix = calloc(sizeof(Viv2DPixmapPrivRec), 1);
-	VIV2D_DBG_MSG("Viv2DCreatePixmap pix %p", pix);
+	if (armsocPix) {
+		Viv2DPixmapPrivPtr pix = calloc(sizeof(Viv2DPixmapPrivRec), 1);
+		VIV2D_DBG_MSG("Viv2DCreatePixmap pix %p", pix);
 
-	_Viv2DSetFormat(32, 32, &pix->format);
+		_Viv2DSetFormat(32, 32, &pix->format);
 
-	armsocPix->priv = pix;
-	pix->armsocPix = armsocPix;
-
+		armsocPix->priv = pix;
+		pix->armsocPix = armsocPix;
+	}
 	return armsocPix;
 }
 
@@ -797,11 +885,11 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 	_Viv2DStreamCacheFlush(v2d);
 
-	VIV2D_DBG_MSG("Viv2DUploadToScreen blit done dst:%p/%p bo:%p buf:%p src_buf:%p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
-	              pDst, dst, dst->bo, etna_bo_map(dst->bo),
-	              src, src_pitch, tmp->pitch, x, y, w, h,
-	              pDst->drawable.width, pDst->drawable.height,
-	              pDst->drawable.depth, pDst->drawable.bitsPerPixel);
+	VIV2D_INFO_MSG("Viv2DUploadToScreen blit done dst:%p/%p bo:%p buf:%p src_buf:%p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d",
+	               pDst, dst, dst->bo, etna_bo_map(dst->bo),
+	               src, src_pitch, tmp->pitch, x, y, w, h,
+	               pDst->drawable.width, pDst->drawable.height,
+	               pDst->drawable.depth, pDst->drawable.bitsPerPixel);
 
 #ifdef VIV2D_USERPTR
 	if (use_usermem) {
@@ -915,8 +1003,6 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	}
 
 	etna_bo_cpu_fini(tmp->bo);
-
-//	munmap(src_buf, etna_bo_size(tmp->bo));
 
 	VIV2D_INFO_MSG("Viv2DDownloadFromScreen blit done %p %p %p(%d/%d) %dx%d(%dx%d) %dx%d %d/%d", pSrc, etna_bo_map(src->bo), src, pitch, tmp->pitch, x, y, w, h,
 	               pSrc->drawable.width, pSrc->drawable.height,
@@ -1295,24 +1381,6 @@ PrepareCopyFail(PixmapPtr pSrc, PixmapPtr pDst, int xdir, int ydir,
 #endif
 
 #ifdef VIV2D_COMPOSITE
-
-static PixmapPtr
-GetDrawablePixmap(DrawablePtr pDrawable) {
-	/* Make sure there is a drawable. */
-	if (NULL == pDrawable) {
-		return NULL;
-	}
-
-	/* Check for a backing pixmap. */
-	if (DRAWABLE_WINDOW == pDrawable->type) {
-
-		WindowPtr pWindow = (WindowPtr) pDrawable;
-		return pDrawable->pScreen->GetWindowPixmap(pWindow);
-	}
-
-	/* Otherwise, it's a regular pixmap. */
-	return (PixmapPtr) pDrawable;
-}
 
 static Bool Viv2DGetPictureFormat(int exa_fmt, Viv2DFormat * fmt) {
 	int i;
@@ -1887,9 +1955,9 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		_Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
 
 		// do not need to to alpha blend for solid src
-//		if (v2d->op.src_type == viv2d_src_solid) {
+		if (v2d->op.src_type == viv2d_src_solid) {
 //			cpy_op = NULL;
-//		}
+		}
 
 		_Viv2DStreamCompAlpha(v2d, v2d->op.src_type, v2d->op.src, &v2d->op.src_fmt, v2d->op.fg, tmp, cpy_op,
 		                      v2d->op.src_alpha_mode_global, v2d->op.src_alpha,
@@ -1900,7 +1968,6 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		                      v2d->op.msk_alpha_mode_global, v2d->op.msk_alpha,
 		                      FALSE, 0,
 		                      maskX, maskY, width, height, mrect, 1);
-//	}
 
 		_Viv2DStreamCompAlpha(v2d, viv2d_src_pix, tmp, &tmp->format, 0, v2d->op.dst, v2d->op.blend_op,
 		                      FALSE, 0,
@@ -2446,6 +2513,15 @@ InitViv2DEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
 		ERROR_MSG("Viv2DEXA: exaDriverInit failed");
 		goto fail;
 	}
+
+#ifdef VIV2D_EXA_HACK
+	// Trapezoids hack
+	PictureScreenPtr ps = GetPictureScreenIfSet(pScreen);
+	ps->Trapezoids = Viv2DTrapezoids;
+	ps->AddTraps = Viv2DAddTraps;
+	ps->Triangles = Viv2DTriangles;
+	ps->AddTriangles = Viv2DAddTriangles;
+#endif
 
 	armsoc_exa->CloseScreen = CloseScreen;
 	armsoc_exa->FreeScreen = FreeScreen;

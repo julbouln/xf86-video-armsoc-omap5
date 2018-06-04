@@ -53,7 +53,7 @@ struct ARMSOCNullEXARec {
 	/* add any other driver private data here.. */
 };
 
-static void AllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf) {
+static void AllocBuf(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, int usage_hint, struct ARMSOCEXABuf *buf) {
 	int pitch = ((width * bpp + FB_MASK) >> FB_SHIFT) * sizeof(FbBits);
 	size_t size = pitch * height;
 	buf->buf = malloc(size);

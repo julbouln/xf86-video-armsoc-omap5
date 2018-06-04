@@ -72,7 +72,7 @@ struct ARMSOCEXARec {
 	void (*Reattach)(PixmapPtr pixmap, int width, int height, int stride);
 
 	// EXA driver buffer allocation, typically let the render DRI card create buffers
-	void (*AllocBuf)(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, struct ARMSOCEXABuf *buf);
+	void (*AllocBuf)(struct ARMSOCEXARec *exa, int width, int height, int depth, int bpp, int usage_hint, struct ARMSOCEXABuf *buf);
 	// EXA driver buffer freeing
 	void (*FreeBuf)(struct ARMSOCEXARec *exa, struct ARMSOCEXABuf *buf);
 

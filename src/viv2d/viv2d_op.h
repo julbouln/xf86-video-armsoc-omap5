@@ -594,7 +594,7 @@ static inline Viv2DPixmapPrivPtr _Viv2DOpCreateTmpPix(Viv2DPtr v2d, int width, i
 
 	tmp = calloc(sizeof(*tmp), 1);
 	pitch = ALIGN(width * ((bpp + 7) / 8), VIV2D_PITCH_ALIGN);
-	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height);
+	tmp->bo = etna_bo_cache_new(v2d->dev, pitch * height, ETNA_BO_WC);
 
 	VIV2D_OP_DBG_MSG("_Viv2DOpCreateTmpPix bo:%p %dx%d %d", tmp->bo, width, height, pitch * height);
 	tmp->width = width;

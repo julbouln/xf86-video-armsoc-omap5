@@ -40,7 +40,7 @@ struct etna_bo_cache {
 // cache
 void etna_bo_cache_destroy(struct etna_device *dev);
 void etna_bo_cache_init(struct etna_device *dev);
-struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size);
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size, int flags);
 void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo);
 void etna_bo_cache_clean(struct etna_device *dev);
 void etna_bo_cache_usermem_del(struct etna_device *dev, struct etna_bo *bo);

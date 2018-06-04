@@ -94,7 +94,7 @@ void etna_bo_cache_init(struct etna_device *dev) {
 #endif
 }
 
-struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
+struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size, int flags) {
 #ifdef ETNAVIV_CUSTOM
 	struct etna_bo_cache *cache = dev->cache;
 	size_t aligned_size = ALIGN(size, ETNA_BO_CACHE_PAGE_SIZE);
@@ -138,7 +138,8 @@ struct etna_bo *etna_bo_cache_new(struct etna_device *dev, size_t size) {
 
 	return NULL;
 #else
-	struct etna_bo *bo = etna_bo_new(dev, size, ETNA_BO_WC);
+	struct etna_bo *bo;
+	bo = etna_bo_new(dev, size, flags);
 	CACHE_DEBUG_MSG("etna_bo_new: new bo:%p", bo);
 	return bo;
 #endif
@@ -278,11 +279,19 @@ void etna_nop(struct etna_cmd_stream *stream) {
 	etna_cmd_stream_emit(stream, 0x18000000);
 }
 
+void etna_bo_unmap(struct etna_bo *bo) {
+	if (bo->map) {
+		munmap(bo->map, bo->size);
+		bo->map = NULL;
+	}
+
+}
+
 int etna_bo_ready(struct etna_bo *bo) {
 #ifdef ETNAVIV_CUSTOM
 	return (bo->state == ETNA_BO_READY);
 #else
-	return 1;
+	return (bo->current_stream == NULL);
 #endif
 }
 
