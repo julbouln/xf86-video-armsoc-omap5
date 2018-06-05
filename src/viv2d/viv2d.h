@@ -107,8 +107,8 @@ typedef struct _Viv2DBlendOp {
 
 enum viv2d_src_type {
 	viv2d_src_pix = 0,
-	viv2d_src_1x1_repeat,
-	viv2d_src_solid,
+	viv2d_src_stretch,
+	viv2d_src_clear,
 	viv2d_src_brush_fill
 };
 

@@ -159,7 +159,9 @@ void etna_bo_cache_del(struct etna_device *dev, struct etna_bo *bo) {
 	}
 	pthread_mutex_unlock(&cache_lock);
 #else
+	pthread_mutex_lock(&cache_lock);
 	queue_push_tail(unused_bos, bo);
+	pthread_mutex_unlock(&cache_lock);
 #endif
 }
 
@@ -240,6 +242,7 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 
 	pthread_mutex_unlock(&cache_lock);
 #else
+	pthread_mutex_lock(&cache_lock);
 	uint32_t qsize = queue_size(unused_bos);
 
 	for (int i = 0; i < qsize; ++i) {
@@ -251,7 +254,7 @@ void etna_bo_cache_clean(struct etna_device *dev) {
 			etna_bo_del(unused_bo);
 		}
 	}
-
+	pthread_mutex_unlock(&cache_lock);
 #endif
 }
 
@@ -271,7 +274,6 @@ void etna_bo_cache_destroy(struct etna_device *dev) {
 	queue_free(unused_bos);
 #endif
 }
-
 
 /* extra */
 

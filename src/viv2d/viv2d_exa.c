@@ -304,26 +304,6 @@ static void Viv2DReattach(PixmapPtr pPixmap, int width, int height, int pitch) {
 	Viv2DAttachBo(pARMSOC, armsocPix);
 }
 
-
-// from libyuv
-static inline void ARGBExtractAlphaRow_NEON(const uint8_t* src_argb,
-        uint8_t* dst_a,
-        int width) {
-	asm volatile(
-	    "1:                                        \n"
-	    "vld4.8     {d0, d2, d4, d6}, [%0]!        \n"  // load 8 ARGB pixels
-	    "vld4.8     {d1, d3, d5, d7}, [%0]!        \n"  // load next 8 ARGB pixels
-	    "subs       %2, %2, #16                    \n"  // 16 processed per loop
-	    "vst1.8     {q3}, [%1]!                    \n"  // store 16 A's.
-	    "bgt       1b                              \n"
-	    : "+r"(src_argb),  // %0
-	    "+r"(dst_a),     // %1
-	    "+r"(width)      // %2
-	    :
-	    : "cc", "memory", "q0", "q1", "q2", "q3"  // Clobber List
-	);
-}
-
 static inline uint32_t Viv2DScale16(uint32_t val, int bits)
 {
 	val <<= (16 - bits);
@@ -558,6 +538,8 @@ void Viv2DTrapezoids(CARD8 op, PicturePtr pSrcPicture, PicturePtr pDstPicture,
 		Viv2DPrepareAccess(pSrc, EXA_PREPARE_SRC);
 	if (pDst)
 		Viv2DPrepareAccess(pDst, EXA_PREPARE_DEST);
+	VIV2D_DBG_MSG("Viv2DTrapezoids");
+
 	fbTrapezoids(op, pSrcPicture, pDstPicture, maskFormat, xSrc, ySrc, ntrap, traps);
 	if (pDst)
 		Viv2DFinishAccess(pDst, EXA_PREPARE_DEST);
@@ -572,6 +554,7 @@ void Viv2DAddTraps(PicturePtr pPicture, INT16 x_off, INT16 y_off,
 	PixmapPtr pPix = GetDrawablePixmap(pPicture->pDrawable);
 
 	Viv2DPrepareAccess(pPix, EXA_PREPARE_DEST);
+	VIV2D_DBG_MSG("Viv2DAddTraps");
 	fbAddTraps(pPicture, x_off, y_off, ntrap, traps);
 	Viv2DFinishAccess(pPix, EXA_PREPARE_DEST);
 }
@@ -586,6 +569,7 @@ void Viv2DTriangles(CARD8 op, PicturePtr pSrcPicture, PicturePtr pDstPicture,
 		Viv2DPrepareAccess(pSrc, EXA_PREPARE_SRC);
 	if (pDst)
 		Viv2DPrepareAccess(pDst, EXA_PREPARE_DEST);
+	VIV2D_DBG_MSG("Viv2DTriangles");
 
 	fbTriangles(op, pSrcPicture, pDstPicture, maskFormat, xSrc, ySrc, ntri, tri);
 	if (pDst)
@@ -596,12 +580,13 @@ void Viv2DTriangles(CARD8 op, PicturePtr pSrcPicture, PicturePtr pDstPicture,
 
 
 void Viv2DAddTriangles(PicturePtr pPicture, INT16 x_off, INT16 y_off,
-    int ntri, xTriangle *tris)
+                       int ntri, xTriangle *tris)
 {
 	PixmapPtr pPix = GetDrawablePixmap(pPicture->pDrawable);
 
 	Viv2DPrepareAccess(pPix, EXA_PREPARE_DEST);
-    fbAddTriangles(pPicture, x_off, y_off, ntri, tris);
+	VIV2D_DBG_MSG("Viv2DAddTriangles");
+	fbAddTriangles(pPicture, x_off, y_off, ntri, tris);
 	Viv2DFinishAccess(pPix, EXA_PREPARE_DEST);
 }
 #endif
@@ -863,8 +848,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 
 
 		while (height--) {
-			neon_memcpy(buf, src_buf, pitch);
-			//		memcpy(buf, src_buf, pitch);
+			memcpy(buf, src_buf, pitch);
 			src_buf += src_pitch;
 			buf += pitch;
 		}
@@ -876,7 +860,7 @@ static Bool Viv2DUploadToScreen(PixmapPtr pDst,
 	rects[0].x2 = x + w;
 	rects[0].y2 = y + h;
 
-	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1) + VIV2D_CACHE_FLUSH_RES);
+	_Viv2DStreamReserve(v2d, VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1) + VIV2D_CACHE_FLUSH_RES);
 	_Viv2DStreamSrc(v2d, tmp); // tmp source
 	_Viv2DStreamSrcOrigin(v2d, src_x, src_y, tmp->width, tmp->height); // tmp source
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, ROP_SRC, NULL);
@@ -979,7 +963,7 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	rects[0].x2 = x + w;
 	rects[0].y2 = y + h;
 
-	_Viv2DStreamReserve(v2d, VIV2D_SRC_PIX_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1));
+	_Viv2DStreamReserve(v2d, VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES + VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_RECTS_RES(1));
 	_Viv2DStreamSrc(v2d, src);
 	_Viv2DStreamSrcOrigin(v2d, 0, 0, tmp->width, tmp->height);
 	_Viv2DStreamDst(v2d, tmp, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, ROP_SRC, NULL);
@@ -996,8 +980,7 @@ static Bool Viv2DDownloadFromScreen(PixmapPtr pSrc,
 	buf = src_buf;
 
 	for (i = 0; i < h; i++) {
-//		memcpy(dst_buf, buf, pitch);
-		neon_memcpy(dst_buf, buf, pitch);
+		memcpy(dst_buf, buf, pitch);
 		dst_buf += dst_pitch;
 		buf += pitch;
 	}
@@ -1086,16 +1069,16 @@ static Bool Viv2DPrepareSolid (PixmapPtr pPixmap,
 	              dst, pPixmap->drawable.width, pPixmap->drawable.height, v2d->op.fg ,
 	              v2d->op.mask, pPixmap->drawable.depth, alu);
 
-#ifdef VIV2D_FILL_BRUSH
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES);
+#ifdef VIV2D_SOLID_FILL_BRUSH
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES);
 #else
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES);
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES);
 #endif
 	_Viv2DStreamEmptySrc(v2d);
 	_Viv2DStreamSrcOrigin(v2d, 0, 0, 0, 0);
 	_Viv2DStreamDst(v2d, v2d->op.dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, FALSE, 0, FALSE, 0); // reset blend
-#ifdef VIV2D_FILL_BRUSH
+#ifdef VIV2D_SOLID_FILL_BRUSH
 	_Viv2DStreamBrushFill(v2d, v2d->op.fg);
 #else
 	_Viv2DStreamColor(v2d, v2d->op.fg);
@@ -1495,7 +1478,11 @@ Viv2DCheckComposite (int op,
 	}
 
 	if ( pSrcPicture->transform ) {
-		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite src transform unsupported");
+		VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite src transform unsupported %d", pSrcPicture->transform);
+		return FALSE;
+	}
+	if (pSrcPicture->filter) {
+		VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported src filter %d", pSrcPicture->filter);
 		return FALSE;
 	}
 
@@ -1515,7 +1502,12 @@ Viv2DCheckComposite (int op,
 #endif
 
 		if (pMaskPicture->transform) {
-			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask transform unsupported");
+			VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask transform unsupported %d", pMaskPicture->transform);
+			return FALSE;
+		}
+
+		if (pMaskPicture->filter) {
+			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported msk filter %d", pMaskPicture->filter);
 			return FALSE;
 		}
 
@@ -1540,7 +1532,6 @@ Viv2DCheckComposite (int op,
 				VIV2D_UNSUPPORTED_MSG("Viv2DCheckComposite mask repeat > 1x1 unsupported");
 				return FALSE;
 			}
-
 		}
 	}
 	if ( pSrcPicture->repeat && pSrc) {
@@ -1658,10 +1649,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported src format %s", pix_format_name(pSrcPicture->format));
 			return FALSE;
 		}
-		if (pSrcPicture->filter) {
-			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported src filter %d", pMaskPicture->filter);
-			return FALSE;
-		}
 	}
 
 	if (pMask != NULL) {
@@ -1676,11 +1663,6 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	if (pMaskPicture != NULL) {
 		if (!Viv2DGetPictureFormat(pMaskPicture->format, &msk_fmt)) {
 			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported msk format %s", pix_format_name(pMaskPicture->format));
-			return FALSE;
-		}
-
-		if (pMaskPicture->filter) {
-			VIV2D_UNSUPPORTED_MSG("Viv2DPrepareComposite unsupported msk filter %d", pMaskPicture->filter);
 			return FALSE;
 		}
 
@@ -1720,18 +1702,18 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	if (pSrc != NULL && pSrcPicture->repeat && pSrc->drawable.width == 1 && pSrc->drawable.height == 1) {
 #ifdef VIV2D_1X1_REPEAT_AS_SOLID
 // armada way
-		v2d->op.src_type = viv2d_src_solid;
+		v2d->op.src_type = viv2d_src_clear;
 		v2d->op.fg = Viv2DColour(Viv2DGetFirstPixel(&pSrc->drawable), src_fmt.depth);
 #else
-		v2d->op.src_type = viv2d_src_1x1_repeat;
+		v2d->op.src_type = viv2d_src_stretch;
 #endif
 	}
 
 	if (pSrc == NULL && pSrcPicture->pSourcePict->type == SourcePictTypeSolidFill) {
-#ifdef VIV2D_FILL_BRUSH
+#ifdef VIV2D_SOLID_FILL_BRUSH
 		v2d->op.src_type = viv2d_src_brush_fill;
 #else
-		v2d->op.src_type = viv2d_src_solid;
+		v2d->op.src_type = viv2d_src_clear;
 #endif
 		v2d->op.fg = Viv2DColour(pSrcPicture->pSourcePict->solidFill.color, src_fmt.depth);
 	}
@@ -1743,18 +1725,18 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		if (pMask != NULL && pMaskPicture->repeat && pMask->drawable.width == 1 && pMask->drawable.height == 1) {
 #ifdef VIV2D_1X1_REPEAT_AS_SOLID
 // armada way
-			v2d->op.msk_type = viv2d_src_solid;
+			v2d->op.msk_type = viv2d_src_clear;
 			v2d->op.mask = Viv2DColour(Viv2DGetFirstPixel(&pMask->drawable), msk_fmt.depth);
 #else
-			v2d->op.msk_type = viv2d_src_1x1_repeat;
+			v2d->op.msk_type = viv2d_src_stretch;
 #endif
 		}
 
 		if (pMask == NULL && pMaskPicture->pSourcePict->type == SourcePictTypeSolidFill) {
-#ifdef VIV2D_FILL_BRUSH
+#ifdef VIV2D_SOLID_FILL_BRUSH
 			v2d->op.msk_type = viv2d_src_brush_fill;
 #else
-			v2d->op.msk_type = viv2d_src_solid;
+			v2d->op.msk_type = viv2d_src_clear;
 #endif
 			v2d->op.mask = Viv2DColour(pMaskPicture->pSourcePict->solidFill.color, msk_fmt.depth);
 		}
@@ -1776,7 +1758,7 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	}
 #endif
 
-	if (v2d->op.src_type == viv2d_src_solid) {
+	if (v2d->op.src_type == viv2d_src_clear) {
 		v2d->op.src_alpha = v2d->op.fg >> 24;
 
 		// VIV2D_INFO_MSG("set src global alpha %d has_mask:%d", v2d->op.src_alpha, v2d->op.has_mask);
@@ -1804,11 +1786,11 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		              pMask, msk, msk->width, msk->height);
 	}
 
-	if (v2d->op.src_type == viv2d_src_solid) {
+	if (v2d->op.src_type == viv2d_src_clear) {
 		VIV2D_DBG_MSG("Viv2DPrepareComposite solid src fg:%08x", v2d->op.fg);
 	}
 
-	if (v2d->op.msk_type == viv2d_src_solid) {
+	if (v2d->op.msk_type == viv2d_src_clear) {
 		VIV2D_DBG_MSG("Viv2DPrepareComposite solid msk %08x", v2d->op.mask);
 	}
 
@@ -1846,14 +1828,14 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 	if (!v2d->op.has_mask) {
 		int reserve = 0;
 		switch (v2d->op.src_type) {
-		case viv2d_src_1x1_repeat:
-			reserve += VIV2D_SRC_1X1_RES;
+		case viv2d_src_stretch:
+			reserve += VIV2D_SRC_STRETCH_RES + VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES;
 			break;
 		case viv2d_src_brush_fill:
-			reserve += VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES;
+			reserve += VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES;
 			break;
-		case viv2d_src_solid:
-			reserve += VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES;
+		case viv2d_src_clear:
+			reserve += VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES;
 			break;
 		default:
 			reserve += VIV2D_SRC_RES;
@@ -1865,13 +1847,13 @@ Viv2DPrepareComposite(int rop, PicturePtr pSrcPicture,
 		_Viv2DStreamReserve(v2d, reserve);
 
 		switch (v2d->op.src_type) {
-		case viv2d_src_1x1_repeat:
+		case viv2d_src_stretch:
 			_Viv2DStreamSrcWithFormat(v2d, v2d->op.src, &v2d->op.src_fmt);
 			_Viv2DStreamSrcOrigin(v2d, 0, 0, 1, 1);
 			_Viv2DStreamStretch(v2d, v2d->op.src, v2d->op.dst);
 			_Viv2DStreamDst(v2d, v2d->op.dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, ROP_SRC, NULL);
 			break;
-		case viv2d_src_solid:
+		case viv2d_src_clear:
 			_Viv2DStreamEmptySrc(v2d);
 			_Viv2DStreamSrcOrigin(v2d, 0, 0, 0, 0);
 			_Viv2DStreamDst(v2d, v2d->op.dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
@@ -1955,7 +1937,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		_Viv2DSetFormat(32, 32, &tmp->format); // A8R8G8B8
 
 		// do not need to to alpha blend for solid src
-		if (v2d->op.src_type == viv2d_src_solid) {
+		if (v2d->op.src_type == viv2d_src_clear) {
 //			cpy_op = NULL;
 		}
 
@@ -1981,10 +1963,10 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		{
 			// stream previous rects
 			if (v2d->op.prev_src_x > -1) {
-				_Viv2DStreamReserve(v2d, VIV2D_SRC_ORIGIN_RES + VIV2D_RECTS_RES(v2d->op.cur_rect) + VIV2D_CACHE_FLUSH_RES);
-				_Viv2DStreamSrcOrigin(v2d, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height);
-				_Viv2DStreamRects(v2d, v2d->op.rects, v2d->op.cur_rect);
-				_Viv2DStreamCacheFlush(v2d);
+
+				_Viv2DStreamCompRects(v2d, v2d->op.src_type,
+				                      v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height,
+				                      v2d->op.rects, v2d->op.cur_rect);
 				v2d->op.cur_rect = 0;
 			}
 		}
@@ -1995,6 +1977,7 @@ Viv2DComposite(PixmapPtr pDst, int srcX, int srcY, int maskX, int maskY,
 		v2d->op.prev_src_y = srcY;
 		v2d->op.prev_width = width;
 		v2d->op.prev_height = height;
+
 	}
 
 	VIV2D_DBG_MSG("Viv2DComposite (src:%p(%dx%d) IN msk:%dx%d) OP dst:%p(%dx%d:%dx%d) : %dx%d src_type:%d fg:%x msk_type:%d has_mask:%d mask:%x",
@@ -2027,12 +2010,12 @@ static void Viv2DDoneComposite (PixmapPtr pDst) {
 		// already done masked operations
 	} else {
 		// last op
-		_Viv2DStreamReserve(v2d, VIV2D_SRC_ORIGIN_RES + VIV2D_RECTS_RES(v2d->op.cur_rect) + VIV2D_CACHE_FLUSH_RES);
-		_Viv2DStreamSrcOrigin(v2d, v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height);
-		_Viv2DStreamRects(v2d, v2d->op.rects, v2d->op.cur_rect);
-		_Viv2DStreamCacheFlush(v2d);
-
-		VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
+		if (v2d->op.cur_rect > 0) {
+			_Viv2DStreamCompRects(v2d, v2d->op.src_type,
+			                      v2d->op.prev_src_x, v2d->op.prev_src_y, v2d->op.prev_width, v2d->op.prev_height,
+			                      v2d->op.rects, v2d->op.cur_rect);
+			VIV2D_DBG_MSG("Viv2DDoneComposite dst:%p %d", pDst, v2d->stream->offset);
+		}
 	}
 
 #ifdef VIV2D_TRACE

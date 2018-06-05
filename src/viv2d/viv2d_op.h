@@ -17,9 +17,6 @@
 #define PAGE_MASK       (~(PAGE_SIZE-1))
 #define PAGE_ALIGN(addr)        (((addr)+PAGE_SIZE-1)&PAGE_MASK)
 
-extern void* neon_memcpy(void* dest, const void* source, unsigned int numBytes);
-extern void* neon_memset(void * ptr, int value, size_t num);
-
 // etnaviv utils
 
 static inline void etna_emit_load_state(struct etna_cmd_stream *stream,
@@ -77,15 +74,11 @@ static inline void etna_add_state(struct etna_cmd_stream *stream, uint32_t value
 }
 
 #define VIV2D_SRC_RES 6
+#define VIV2D_SRC_EMPTY_RES 4
 #define VIV2D_SRC_ORIGIN_RES 4
-
-#define VIV2D_SRC_PIX_RES VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES
-#define VIV2D_SRC_EMPTY_RES 4 + VIV2D_SRC_ORIGIN_RES
-
 #define VIV2D_SRC_SOLID_RES 2
-
 #define VIV2D_SRC_BRUSH_FILL_RES 8
-#define VIV2D_SRC_1X1_RES 16
+#define VIV2D_SRC_STRETCH_RES 4
 #define VIV2D_DEST_RES 10
 #define VIV2D_BLEND_ON_RES 8
 #define VIV2D_BLEND_OFF_RES 2
@@ -153,6 +146,21 @@ static inline void _Viv2DOpInit(Viv2DOp *op) {
 	op->mask = 0;
 }
 
+static inline int _VIV2DDumpStream(Viv2DPtr v2d) {
+	for (int i = 0; i < v2d->stream->offset; i+=8 ) {
+		xf86Msg(X_INFO, "%05d: %08x %05d: %08x %05d: %08x %05d: %08x %05d: %08x %05d: %08x %05d: %08x %05d: %08x\n", 
+			i, v2d->stream->buffer[i],
+			i+1, v2d->stream->buffer[i+1],
+			i+2, v2d->stream->buffer[i+2],
+			i+3, v2d->stream->buffer[i+3],
+			i+4, v2d->stream->buffer[i+4],
+			i+5, v2d->stream->buffer[i+5],
+			i+6, v2d->stream->buffer[i+6],
+			i+7, v2d->stream->buffer[i+7]
+			);
+	}
+}
+
 static inline int _Viv2DStreamWait(Viv2DPtr v2d) {
 	etna_bo_cache_clean(v2d->dev);
 //	VIV2D_DBG_MSG("_Viv2DStreamCommit pipe wait start");
@@ -168,6 +176,7 @@ static inline void _Viv2DStreamCommit(Viv2DPtr v2d, Bool async) {
 //	VIV2D_DBG_MSG("_Viv2DStreamCommit %d %d (%d)", async, etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	if (etna_cmd_stream_offset(v2d->stream) > 0) {
 		VIV2D_DBG_MSG("_Viv2DStreamCommit flush start %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
+//		_VIV2DDumpStream(v2d);
 		etna_cmd_stream_flush(v2d->stream);
 //		VIV2D_DBG_MSG("_Viv2DStreamCommit flush end %d (%d)", etna_cmd_stream_avail(v2d->stream), v2d->stream->offset);
 	}
@@ -329,7 +338,7 @@ static inline void _Viv2DStreamDst(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, int cmd
 #endif
 
 	VIV2D_OP_DBG_MSG("_Viv2DStreamDst dst:%p fmt:%s/%s",
-	              dst, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
+	                 dst, Viv2DFormatColorStr(&dst->format), Viv2DFormatSwizzleStr(&dst->format));
 
 }
 
@@ -364,7 +373,6 @@ static inline void _Viv2DStreamStretch(Viv2DPtr v2d, Viv2DPixmapPrivPtr src, Viv
 
 static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rect) {
 	if (cur_rect > 0) {
-//	VIV2D_INFO_MSG("stream rects cur_rect:%d",cur_rect);
 //		_Viv2DStreamReserve(v2d->stream, cur_rect * 2 + 2);
 		etna_cmd_stream_emit(v2d->stream,
 		                     VIV_FE_DRAW_2D_HEADER_OP_DRAW_2D |
@@ -374,6 +382,7 @@ static inline void _Viv2DStreamRects(Viv2DPtr v2d, Viv2DRect *rects, int cur_rec
 
 		for (int i = 0; i < cur_rect; i++) {
 			Viv2DRect tmprect = rects[i];
+			VIV2D_OP_DBG_MSG("_Viv2DStreamRects rect cur_rect:%d %dx%d:%dx%d", i, tmprect.x1, tmprect.y1, tmprect.x2, tmprect.y2);
 			etna_cmd_stream_emit(v2d->stream, VIV_FE_DRAW_2D_TOP_LEFT_X(tmprect.x1) |
 			                     VIV_FE_DRAW_2D_TOP_LEFT_Y(tmprect.y1));
 			etna_cmd_stream_emit(v2d->stream, VIV_FE_DRAW_2D_BOTTOM_RIGHT_X(tmprect.x2) |
@@ -474,17 +483,17 @@ static inline void _Viv2DStreamCacheFlush(Viv2DPtr v2d) {
 static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_rect, Bool blend) {
 	int reserve = 0;
 	switch (src_type) {
-	case viv2d_src_1x1_repeat:
-		reserve += VIV2D_SRC_1X1_RES;
+	case viv2d_src_stretch:
+		reserve += VIV2D_SRC_STRETCH_RES + VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES;
 		break;
 	case viv2d_src_brush_fill:
-		reserve += VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES;
+		reserve += VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES;
 		break;
-	case viv2d_src_solid:
-		reserve += VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES;
+	case viv2d_src_clear:
+		reserve += VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES;
 		break;
 	default:
-		reserve += VIV2D_SRC_PIX_RES;
+		reserve += VIV2D_SRC_RES + VIV2D_SRC_ORIGIN_RES;
 		break;
 	}
 	reserve += VIV2D_DEST_RES; // dest
@@ -501,7 +510,7 @@ static inline void _Viv2DStreamReserveComp(Viv2DPtr v2d, int src_type, int cur_r
 }
 
 static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint32_t color, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_SOLID_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
 	_Viv2DStreamEmptySrc(v2d);
 	_Viv2DStreamSrcOrigin(v2d, 0, 0, 0, 0);
 	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
@@ -512,10 +521,10 @@ static inline void _Viv2DStreamSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint3
 }
 
 static inline void _Viv2DStreamBrushSolid(Viv2DPtr v2d, Viv2DPixmapPrivPtr dst, uint32_t color, Viv2DRect *rects, int cur_rect) {
-	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
+	_Viv2DStreamReserve(v2d, VIV2D_DEST_RES + VIV2D_BLEND_OFF_RES + VIV2D_SRC_BRUSH_FILL_RES + VIV2D_SRC_EMPTY_RES + VIV2D_SRC_ORIGIN_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
 	_Viv2DStreamEmptySrc(v2d);
 	_Viv2DStreamSrcOrigin(v2d, 0, 0, 0, 0);
-	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, 0xf0, NULL);
+	_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, 0xf0, NULL);
 	_Viv2DStreamBlendOp(v2d, NULL, FALSE, 0, FALSE, 0); // reset blend
 	_Viv2DStreamBrushFill(v2d, color);
 	_Viv2DStreamRects(v2d, rects, cur_rect);
@@ -532,13 +541,13 @@ static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmap
 	_Viv2DStreamReserveComp(v2d, src_type, cur_rect, blend);
 
 	switch (src_type) {
-	case viv2d_src_1x1_repeat:
+	case viv2d_src_stretch:
 		_Viv2DStreamSrcWithFormat(v2d, src, src_fmt);
 		_Viv2DStreamSrcOrigin(v2d, 0, 0, 1, 1);
 		_Viv2DStreamStretch(v2d, src, dst);
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_STRETCH_BLT, ROP_SRC, NULL);
 		break;
-	case viv2d_src_solid:
+	case viv2d_src_clear:
 		_Viv2DStreamEmptySrc(v2d);
 		_Viv2DStreamSrcOrigin(v2d, 0, 0, 0, 0);
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_CLEAR, ROP_SRC, NULL);
@@ -550,7 +559,6 @@ static inline void _Viv2DStreamCompAlpha(Viv2DPtr v2d, int src_type, Viv2DPixmap
 		_Viv2DStreamDst(v2d, dst, VIVS_DE_DEST_CONFIG_COMMAND_BIT_BLT, 0xf0, NULL);
 		_Viv2DStreamBrushFill(v2d, color);
 		break;
-
 	default:
 		_Viv2DStreamSrcWithFormat(v2d, src, src_fmt);
 		_Viv2DStreamSrcOrigin(v2d, x, y, w, h);
@@ -570,6 +578,16 @@ static inline void _Viv2DStreamComp(Viv2DPtr v2d, int src_type, Viv2DPixmapPrivP
 	_Viv2DStreamCompAlpha(v2d, src_type, src, src_fmt, color, dst, blend_op, FALSE, 0, FALSE, 0, x, y, w, h, rects, cur_rect);
 }
 
+static inline void _Viv2DStreamCompRects(Viv2DPtr v2d, int src_type, int x, int y, int w, int h, Viv2DRect *rects, int cur_rect) {
+	if (src_type == viv2d_src_stretch) {
+		_Viv2DStreamReserve(v2d, VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
+	} else {
+		_Viv2DStreamReserve(v2d, VIV2D_SRC_ORIGIN_RES + VIV2D_RECTS_RES(cur_rect) + VIV2D_CACHE_FLUSH_RES);
+		_Viv2DStreamSrcOrigin(v2d, x, y, w, h);
+	}
+	_Viv2DStreamRects(v2d, rects, cur_rect);
+	_Viv2DStreamCacheFlush(v2d);
+}
 
 static inline void _Viv2DStreamClear(Viv2DPtr v2d, Viv2DPixmapPrivPtr pix) {
 	if (pix && pix->bo) {
